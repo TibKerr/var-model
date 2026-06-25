@@ -8,9 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 portfolio three independent ways — **historical**, **variance-covariance
 (parametric)**, and **Monte Carlo**. The comparison of those methods and the
 explanation of *why they diverge* is the project's headline deliverable, not an
-afterthought. Price data comes from `yfinance`; raw prices and computed returns
-are persisted to SQL via SQLAlchemy, and risk results are written back to the
-same database for cross-run comparison.
+afterthought. Price data comes from the Alpha Vantage REST API (called directly
+with `requests`); raw prices and computed returns are persisted to SQL via
+SQLAlchemy, and risk results are written back to the same database for cross-run
+comparison.
+
+The Alpha Vantage key is read from the `ALPHAVANTAGE_API_KEY` environment
+variable (loaded from a git-ignored `.env` via `python-dotenv` in dev) — never
+hard-coded or committed. The free tier is rate-limited (~5 req/min, ~25/day), so
+the data layer throttles and caches to the DB.
 
 ## Commands
 
@@ -42,14 +48,14 @@ The design deliberately separates a **pure math core** from an **I/O layer**:
   `numpy`/`scipy`. It takes arrays/numbers in and returns numbers out — no
   network, no database. This is what makes the math testable against synthetic
   distributions with no external dependencies. *Keep it that way:* do not import
-  `yfinance` or `sqlalchemy` into these modules even though they are installed.
+  `requests` or `sqlalchemy` into these modules even though they are installed.
 - **I/O layer** (`data/`) owns everything that touches the network or disk:
-  SQLAlchemy models/session and yfinance ingestion.
+  SQLAlchemy models/session and Alpha Vantage ingestion (`requests`).
 - **CLI** (`cli.py`) stays thin — it parses arguments and delegates to the core
   and data layers. No business logic.
 
 All dependencies are a single required runtime set (numpy, scipy, pandas,
-sqlalchemy, yfinance); the core/IO separation is enforced by module
+sqlalchemy, requests, python-dotenv); the core/IO separation is enforced by module
 responsibility at the code level, not by packaging extras.
 
 > Phase status: the scaffold and CLI exist; `var.py`, `risk.py`, `divergence.py`,

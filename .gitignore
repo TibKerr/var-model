@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Secrets / local config (never commit the real key)
+.env
+
 # Test / type-check caches
 .pytest_cache/
 .mypy_cache/
