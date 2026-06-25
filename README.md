@@ -1,13 +1,15 @@
 # var-model
 
-Value-at-Risk and Expected Shortfall for a small equity portfolio, computed
-three independent ways — **historical**, **variance-covariance (parametric)**,
-and **Monte Carlo** — with the divergence between methods as the headline
-analysis.
+This is an Ensemble Value-at-Risk and Expected Shortfall for a small equity portfolio.
+It leverages the three main methods of calculating VaR independently:
+- Historical
+- Parametric (Variance-Covariance)
+- Monte Carlo
+The divergence of these methods is intended to the headline analysis for this repo.
 
-Real price data is pulled with `yfinance`, raw prices and computed returns are
-persisted to SQL (SQLAlchemy), and risk results are written back to the same
-database for comparison across runs.
+Real market data is acquired through yFinance. Raw prices and computed
+returns are then stored in SQL databases (SQL Academy), and risk results are written back to'
+the same database for comparison across trials.
 
 ## Install
 
