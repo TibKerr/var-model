@@ -115,3 +115,56 @@ large normal sample and compares historical VaR/ES to the closed-form normal
 quantile and tail expectation (via `scipy`), with a method-aware relative
 tolerance (5%) rather than exact equality — sampling noise and the empirical
 quantile's coarseness make equality the wrong assertion.
+
+---
+
+## Methods — milestone 2: Parametric (variance-covariance)
+
+The parametric method assumes returns are **normally distributed**, estimates
+the mean and volatility from the sample, and reads VaR/ES off the closed-form
+normal tail.
+
+**Formulas** (with `z = Phi^{-1}(confidence)`, `phi` the standard-normal pdf,
+`alpha = 1 - confidence`):
+
+- `VaR = (z·sigma - mu) · sqrt(horizon) · value`
+- `ES  = (sigma·phi(z)/alpha - mu) · sqrt(horizon) · value`
+
+**Estimator choices and why:**
+
+- **Unbiased volatility (`ddof=1`).** We are *estimating* the population sigma
+  from a sample, so the sample standard deviation (dividing by `n-1`) is the
+  right estimator. The reference tests pin this down by comparing against the
+  exact `ddof=1` value.
+- **The mean is estimated and subtracted, not assumed zero.** This is the key
+  decision for the divergence analysis. Historical VaR already embeds the drift
+  through the empirical quantile; if parametric assumed `mu = 0` while historical
+  did not, the two would diverge for a reason that has nothing to do with
+  distributional shape. By treating the mean identically, any remaining
+  divergence is attributable to the **shape assumption** — which is exactly what
+  we want to study. (For 1-day horizons `mu` is typically tiny next to `z·sigma`,
+  so this rarely moves the number much, but it keeps the comparison honest.)
+- **`scipy.stats.norm`** supplies `ppf`/`pdf`; `scipy` is allowed in the math
+  core alongside `numpy`.
+
+**The divergence story begins here.** On a genuinely normal sample the
+parametric and historical numbers converge (the headline cross-check asserts
+agreement within 5% on 200k–300k draws). They *diverge* on real returns because
+real returns are **not** normal:
+
+- **Fat tails (excess kurtosis).** Equity returns have more extreme moves than a
+  normal allows. Parametric VaR, anchored to `z·sigma`, **understates** deep-tail
+  risk; historical, reading an actual empirical quantile, captures those moves if
+  they are in the window. The gap typically widens at 99% vs 95%.
+- **Skew.** The normal is symmetric; real equity returns are often
+  left-skewed (crashes bigger than melt-ups). Parametric cannot see this;
+  historical can.
+- **Where parametric wins.** It is smooth and stable (no dependence on whether a
+  single bad day happens to sit in the window), and it extrapolates into the tail
+  rather than being capped by the worst observation — so at very high confidence
+  with a short window it can actually be the more *conservative* of the two.
+
+Monte Carlo (milestone 3) will simulate from these same estimated parameters; on
+a normal model it should converge to parametric, which makes it both a validation
+of the parametric formula and the natural place to introduce a non-normal
+generating distribution later.
