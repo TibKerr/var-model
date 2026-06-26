@@ -21,6 +21,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from scipy.stats import norm
 
 Method = Literal["historical", "parametric", "monte_carlo"]
 
@@ -68,6 +69,19 @@ def _quantile(returns: NDArray[np.float64], confidence: float) -> float:
     return float(np.quantile(returns, alpha, method="linear"))
 
 
+def _normal_params(returns: NDArray[np.float64]) -> tuple[float, float]:
+    """Sample mean and unbiased (ddof=1) standard deviation of the returns.
+
+    Shared by the parametric VaR and Expected Shortfall. Requires at least two
+    observations — a single point has no defined sample volatility.
+    """
+    if returns.size < 2:
+        raise ValueError(
+            "parametric method requires at least 2 returns to estimate volatility"
+        )
+    return float(returns.mean()), float(returns.std(ddof=1))
+
+
 def value_at_risk(
     returns: ArrayLike,
     confidence: float = 0.95,
@@ -80,12 +94,19 @@ def value_at_risk(
     Returned as a positive loss in the same units as ``value`` (default 1.0, so
     the result is a loss fraction of the portfolio).
 
-    Historical VaR sorts the observed returns and reads off the empirical
-    ``(1 - confidence)`` quantile — no distributional assumption. The parametric
-    and Monte Carlo methods land in later milestones.
+    - **historical** sorts the observed returns and reads off the empirical
+      ``(1 - confidence)`` quantile — no distributional assumption.
+    - **parametric** assumes returns are normal: ``VaR = z·sigma - mu`` with
+      ``z = Phi^{-1}(confidence)`` and mu/sigma estimated from the returns.
+
+    The Monte Carlo method lands in a later milestone.
     """
     arr = validate_inputs(returns, confidence, horizon, value, method)
     if method == "historical":
         q = _quantile(arr, confidence)
         return float(-q * np.sqrt(horizon) * value)
+    if method == "parametric":
+        mu, sigma = _normal_params(arr)
+        z = float(norm.ppf(confidence))
+        return float((z * sigma - mu) * np.sqrt(horizon) * value)
     raise NotImplementedError(f"{method!r} VaR is not implemented yet")
