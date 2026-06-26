@@ -99,3 +99,80 @@ def test_validation_rejects_empty_returns() -> None:
 def test_validation_rejects_nonfinite_returns() -> None:
     with pytest.raises(ValueError, match="finite"):
         value_at_risk([0.01, np.nan, -0.02], confidence=0.95)
+
+
+# =============================================================================
+# Parametric (variance-covariance) VaR
+# =============================================================================
+
+# mean 0, unbiased (ddof=1) std = sqrt(2.5) * 0.01.
+NORMAL5 = np.array([-2.0, -1.0, 0.0, 1.0, 2.0]) * 0.01
+
+
+# --- Pillar 1: reference value (closed-form normal formula) -------------------
+
+def test_parametric_reference_normal_formula() -> None:
+    # z*sigma - mu with mu = 0; sigma written out as the exact ddof=1 std.
+    expected = norm.ppf(0.99) * np.sqrt(2.5) * 0.01
+    assert value_at_risk(NORMAL5, confidence=0.99, method="parametric") == pytest.approx(
+        expected, rel=1e-12
+    )
+
+
+def test_parametric_incorporates_mean() -> None:
+    # Same shape shifted up by 0.5%: sigma unchanged, mu = 0.005 reduces the loss.
+    shifted = NORMAL5 + 0.005
+    expected = norm.ppf(0.99) * np.sqrt(2.5) * 0.01 - 0.005
+    assert value_at_risk(shifted, confidence=0.99, method="parametric") == pytest.approx(
+        expected, rel=1e-12
+    )
+
+
+# --- Pillar 2: independent cross-check (THE headline: parametric vs historical) ---
+
+def test_parametric_agrees_with_historical_on_normal() -> None:
+    rng = np.random.default_rng(7)
+    sample = rng.normal(loc=0.0005, scale=0.02, size=200_000)
+    for c in (0.95, 0.99):
+        parametric = value_at_risk(sample, confidence=c, method="parametric")
+        historical = value_at_risk(sample, confidence=c, method="historical")
+        assert parametric == pytest.approx(historical, rel=0.05)
+
+
+# --- Pillar 3: invariants -----------------------------------------------------
+
+def test_parametric_monotone_in_confidence() -> None:
+    assert value_at_risk(NORMAL5, confidence=0.99, method="parametric") >= value_at_risk(
+        NORMAL5, confidence=0.95, method="parametric"
+    )
+
+
+def test_parametric_horizon_and_value_scaling() -> None:
+    base = value_at_risk(NORMAL5, confidence=0.95, method="parametric")
+    scaled = value_at_risk(
+        NORMAL5, confidence=0.95, method="parametric", horizon=4, value=1_000_000
+    )
+    assert scaled == pytest.approx(base * 2.0 * 1_000_000)
+
+
+# --- Pillar 4: edge cases -----------------------------------------------------
+
+def test_parametric_zero_variance_zero_returns() -> None:
+    # sigma = 0, mu = 0 -> VaR = 0.
+    assert value_at_risk([0.0] * 10, confidence=0.95, method="parametric") == pytest.approx(
+        0.0
+    )
+
+
+def test_parametric_constant_loss_is_that_loss() -> None:
+    # sigma = 0, mu = -0.01 -> VaR = -mu = 0.01 (a certain 1% loss).
+    assert value_at_risk(
+        [-0.01] * 10, confidence=0.95, method="parametric"
+    ) == pytest.approx(0.01)
+
+
+# --- Pillar 5: validation -----------------------------------------------------
+
+def test_parametric_requires_at_least_two_returns() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        value_at_risk([0.01], confidence=0.95, method="parametric")
