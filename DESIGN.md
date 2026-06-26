@@ -68,3 +68,50 @@ directly with `requests`, rather than `yfinance`.
   must throttle (≈12 s between calls) and cache fetched series to the database
   so a re-run doesn't re-spend the daily budget. This shapes the fetch design
   more than `yfinance` did.
+
+---
+
+## Methods — milestone 1: Historical VaR + Expected Shortfall
+
+Each VaR method is built and committed independently. The historical method is
+first because it is the most intuitive and serves as the sanity-check baseline
+the other two are measured against.
+
+**Shared API conventions (set here, used by all three methods):**
+
+- All methods take the **same `returns` array** plus `confidence`, `horizon`,
+  and `value`. Running every method on identical data is what makes the
+  divergence analysis meaningful — differences are the *method*, not the input.
+- `confidence ∈ (0, 1)`; tail probability `alpha = 1 - confidence`
+  (`confidence=0.95` → the 5th percentile). Default is `0.95`.
+- VaR and ES are returned as **positive losses** in the units of `value`
+  (default `1.0`, so a loss *fraction*). This makes the `ES ≥ VaR` invariant
+  read naturally.
+- Multi-day horizons use the **square-root-of-time** rule.
+
+**Historical VaR.** Sort the observed returns and read off the empirical
+`alpha`-quantile — *no distributional assumption*. We use `numpy`'s linear
+interpolation between order statistics (`np.quantile(..., method="linear")`).
+The quantile is a return (typically negative); VaR is its negation.
+
+**Historical Expected Shortfall.** Average every observed return at or below the
+`alpha`-quantile — the mean loss *given* the threshold is breached. Because the
+mean of the tail is at least as extreme as the threshold itself, `ES ≥ VaR`
+holds by construction. `_quantile` is shared with VaR so the two metrics use the
+*same* tail cutoff.
+
+**Why this is the baseline.** Historical VaR's only assumption is that the
+sampled past resembles the future. Its strength (no shape assumption — it
+captures fat tails and skew if they are *in the window*) is also its weakness:
+it is **hostage to its lookback window**. No crash in the sample → no crash in
+the estimate, and the quantile is a step function of a finite sample (coarse and
+jumpy in the deep tail). Those limitations are exactly what the parametric and
+Monte Carlo methods trade against, and they set up the divergence discussion.
+
+**Testing notes.** Reference values use a hand-built symmetric return series
+whose quantile positions are integers, so the expected quantile lands exactly on
+an order statistic with no interpolation. The independent cross-check draws a
+large normal sample and compares historical VaR/ES to the closed-form normal
+quantile and tail expectation (via `scipy`), with a method-aware relative
+tolerance (5%) rather than exact equality — sampling noise and the empirical
+quantile's coarseness make equality the wrong assertion.
