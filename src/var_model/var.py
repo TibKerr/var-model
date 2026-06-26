@@ -82,12 +82,29 @@ def _normal_params(returns: NDArray[np.float64]) -> tuple[float, float]:
     return float(returns.mean()), float(returns.std(ddof=1))
 
 
+def _simulate_normal(
+    mu: float, sigma: float, n_sims: int, seed: int | None
+) -> NDArray[np.float64]:
+    """Draw ``n_sims`` returns from ``N(mu, sigma)`` for the Monte Carlo method.
+
+    A ``seed`` makes the simulation reproducible (so a run can be repeated and
+    so Monte Carlo VaR and ES share the same draws within a report).
+    """
+    if n_sims < 1:
+        raise ValueError(f"n_sims must be a positive integer, got {n_sims}")
+    rng = np.random.default_rng(seed)
+    return rng.normal(loc=mu, scale=sigma, size=n_sims)
+
+
 def value_at_risk(
     returns: ArrayLike,
     confidence: float = 0.95,
     method: Method = "historical",
     horizon: int = 1,
     value: float = 1.0,
+    *,
+    n_sims: int = 100_000,
+    seed: int | None = None,
 ) -> float:
     """Value-at-Risk: the loss not exceeded with probability ``confidence``.
 
@@ -98,8 +115,11 @@ def value_at_risk(
       ``(1 - confidence)`` quantile — no distributional assumption.
     - **parametric** assumes returns are normal: ``VaR = z·sigma - mu`` with
       ``z = Phi^{-1}(confidence)`` and mu/sigma estimated from the returns.
+    - **monte_carlo** estimates mu/sigma the same way, simulates ``n_sims``
+      normal draws, and reads the empirical quantile off the simulation. On a
+      normal model it converges to the parametric result, which validates both.
 
-    The Monte Carlo method lands in a later milestone.
+    ``n_sims`` and ``seed`` apply only to the Monte Carlo method.
     """
     arr = validate_inputs(returns, confidence, horizon, value, method)
     if method == "historical":
@@ -109,4 +129,9 @@ def value_at_risk(
         mu, sigma = _normal_params(arr)
         z = float(norm.ppf(confidence))
         return float((z * sigma - mu) * np.sqrt(horizon) * value)
+    if method == "monte_carlo":
+        mu, sigma = _normal_params(arr)
+        sim = _simulate_normal(mu, sigma, n_sims, seed)
+        q = _quantile(sim, confidence)
+        return float(-q * np.sqrt(horizon) * value)
     raise NotImplementedError(f"{method!r} VaR is not implemented yet")
