@@ -168,3 +168,57 @@ Monte Carlo (milestone 3) will simulate from these same estimated parameters; on
 a normal model it should converge to parametric, which makes it both a validation
 of the parametric formula and the natural place to introduce a non-normal
 generating distribution later.
+
+---
+
+## Methods — milestone 3: Monte Carlo
+
+The Monte Carlo method estimates `mu`/`sigma` exactly as the parametric method
+does, then **simulates** `n_sims` draws from `N(mu, sigma)` and reads VaR/ES off
+the *simulated* distribution — empirical quantile for VaR, simulated-tail mean
+for ES — reusing the same `_quantile`/tail machinery as the historical method.
+
+**Design choices and why:**
+
+- **Same estimator, simulated instead of solved.** Because MC draws from the
+  fitted normal, on a normal model it must converge to the parametric closed
+  form as `n_sims → ∞`. That convergence is the milestone's headline test (MC vs
+  parametric within ~3–4% at 100k–200k draws) and it **validates two methods at
+  once**: if the analytic formula and the simulation agree, both are almost
+  certainly right.
+- **Reproducibility via `seed`.** MC is stochastic, but a risk number you can't
+  reproduce is hard to trust or store. A keyword-only `seed` makes a run
+  repeatable; `risk_report` passes the *same* seed to MC VaR and ES so they draw
+  from one simulation and the `ES ≥ VaR` invariant holds exactly rather than
+  probabilistically.
+- **`n_sims` default 100k.** Enough for a stable 99% tail while staying fast.
+  It is validated (`>= 1`) in the MC branch, not in the shared `validate_inputs`,
+  since it is method-specific — the same pattern as the parametric "≥ 2 returns"
+  guard.
+- **Horizon via the shared √-time rule.** MC simulates single-period returns and
+  scales by `sqrt(horizon)` like the other two methods, keeping all three
+  comparable. Simulating multi-step compounded paths is the obvious extension and
+  the natural home for a non-normal step distribution.
+
+**Where MC sits in the divergence story.** As currently built (Gaussian
+generator) MC carries the **same normality assumption as parametric**, so it
+shares parametric's blind spot to fat tails and skew and will likewise diverge
+from historical on real returns. Its value here is twofold: (1) a cross-check
+that the parametric algebra is correct, and (2) the one method whose *generating
+distribution is a free parameter* — swapping the normal draw for a Student-t or a
+bootstrap of the empirical returns would let MC capture fat tails while keeping
+the smooth, extrapolating-into-the-tail character that historical lacks. That is
+the most promising lever for the divergence analysis and a documented next step.
+
+---
+
+## Phase 2 complete — the three methods
+
+All three VaR methods and their Expected Shortfall companions now exist in the
+pure `numpy`/`scipy` core, each built and committed independently with a
+five-pillar test suite, and bundled by `risk_report`. The divergence behaviour
+is now demonstrable end to end: on normal data the three methods agree; on
+fat-tailed data historical pulls away from parametric and (Gaussian) Monte Carlo
+in the deep tail, with the gap widening at higher confidence and largest for ES.
+The dedicated divergence-analysis tool and the data/persistence layer build on
+this foundation.
