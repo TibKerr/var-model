@@ -93,3 +93,53 @@ def test_risk_report_keys_and_consistency() -> None:
     )
     assert report["es_historical"] >= report["var_historical"]
     assert report["es_parametric"] >= report["var_parametric"]
+
+
+# =============================================================================
+# Parametric (variance-covariance) Expected Shortfall
+# =============================================================================
+
+# mean 0, unbiased (ddof=1) std = sqrt(2.5) * 0.01.
+NORMAL5 = np.array([-2.0, -1.0, 0.0, 1.0, 2.0]) * 0.01
+
+
+def test_parametric_es_reference_normal_formula() -> None:
+    sigma = np.sqrt(2.5) * 0.01
+    c = 0.99
+    expected = sigma * norm.pdf(norm.ppf(c)) / (1.0 - c)  # mu = 0
+    assert expected_shortfall(NORMAL5, confidence=c, method="parametric") == pytest.approx(
+        expected, rel=1e-12
+    )
+
+
+def test_parametric_es_incorporates_mean() -> None:
+    shifted = NORMAL5 + 0.005
+    sigma = np.sqrt(2.5) * 0.01
+    c = 0.99
+    expected = sigma * norm.pdf(norm.ppf(c)) / (1.0 - c) - 0.005
+    assert expected_shortfall(shifted, confidence=c, method="parametric") == pytest.approx(
+        expected, rel=1e-12
+    )
+
+
+def test_parametric_es_agrees_with_historical_on_normal() -> None:
+    rng = np.random.default_rng(11)
+    sample = rng.normal(loc=0.0, scale=0.02, size=300_000)
+    for c in (0.95, 0.99):
+        parametric = expected_shortfall(sample, confidence=c, method="parametric")
+        historical = expected_shortfall(sample, confidence=c, method="historical")
+        assert parametric == pytest.approx(historical, rel=0.05)
+
+
+def test_parametric_es_at_least_var() -> None:
+    rng = np.random.default_rng(12)
+    sample = rng.normal(0.0, 0.02, 50_000)
+    for c in (0.90, 0.95, 0.99):
+        es = expected_shortfall(sample, confidence=c, method="parametric")
+        var = value_at_risk(sample, confidence=c, method="parametric")
+        assert es >= var
+
+
+def test_parametric_es_requires_at_least_two_returns() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        expected_shortfall([0.01], confidence=0.95, method="parametric")
