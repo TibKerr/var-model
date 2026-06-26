@@ -176,3 +176,76 @@ def test_parametric_constant_loss_is_that_loss() -> None:
 def test_parametric_requires_at_least_two_returns() -> None:
     with pytest.raises(ValueError, match="at least 2"):
         value_at_risk([0.01], confidence=0.95, method="parametric")
+
+
+# =============================================================================
+# Monte Carlo VaR
+# =============================================================================
+
+def _normal_sample(seed: int = 99, size: int = 5_000) -> np.ndarray:
+    return np.random.default_rng(seed).normal(0.0003, 0.02, size)
+
+
+# --- Pillar 1: reference value (simulation reproduces the normal quantile) -----
+
+def test_mc_reference_normal_quantile() -> None:
+    # MC simulates from NORMAL5's estimated params (mu=0, sigma=sqrt(2.5)*0.01),
+    # so it should reproduce the analytic normal VaR within sampling tolerance.
+    expected = norm.ppf(0.99) * np.sqrt(2.5) * 0.01
+    mc = value_at_risk(NORMAL5, confidence=0.99, method="monte_carlo", n_sims=200_000, seed=0)
+    assert mc == pytest.approx(expected, rel=0.05)
+
+
+# --- Pillar 2: independent cross-check (MC converges to parametric) ------------
+
+def test_mc_converges_to_parametric_on_normal() -> None:
+    sample = _normal_sample()
+    for c in (0.95, 0.99):
+        mc = value_at_risk(sample, confidence=c, method="monte_carlo", n_sims=200_000, seed=0)
+        parametric = value_at_risk(sample, confidence=c, method="parametric")
+        assert mc == pytest.approx(parametric, rel=0.03)
+
+
+# --- Pillar 3: invariants -----------------------------------------------------
+
+def test_mc_monotone_in_confidence() -> None:
+    sample = _normal_sample()
+    hi = value_at_risk(sample, confidence=0.99, method="monte_carlo", seed=0)
+    lo = value_at_risk(sample, confidence=0.95, method="monte_carlo", seed=0)
+    assert hi >= lo
+
+
+def test_mc_horizon_and_value_scaling() -> None:
+    # Same seed -> identical draws -> scaling is exact.
+    base = value_at_risk(NORMAL5, confidence=0.95, method="monte_carlo", seed=0)
+    scaled = value_at_risk(
+        NORMAL5, confidence=0.95, method="monte_carlo", horizon=4, value=1_000_000, seed=0
+    )
+    assert scaled == pytest.approx(base * 2.0 * 1_000_000)
+
+
+def test_mc_reproducible_with_seed() -> None:
+    a = value_at_risk(NORMAL5, confidence=0.95, method="monte_carlo", seed=123)
+    b = value_at_risk(NORMAL5, confidence=0.95, method="monte_carlo", seed=123)
+    assert a == b
+
+
+# --- Pillar 4: edge cases -----------------------------------------------------
+
+def test_mc_zero_variance_zero_returns() -> None:
+    # sigma = 0 -> every draw equals mu = 0 -> VaR = 0.
+    assert value_at_risk(
+        [0.0] * 10, confidence=0.95, method="monte_carlo", seed=0
+    ) == pytest.approx(0.0)
+
+
+# --- Pillar 5: validation -----------------------------------------------------
+
+def test_mc_requires_positive_n_sims() -> None:
+    with pytest.raises(ValueError, match="n_sims"):
+        value_at_risk(NORMAL5, confidence=0.95, method="monte_carlo", n_sims=0, seed=0)
+
+
+def test_mc_requires_at_least_two_returns() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        value_at_risk([0.01], confidence=0.95, method="monte_carlo", seed=0)
