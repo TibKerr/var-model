@@ -75,12 +75,14 @@ def test_validation_rejects_bad_scalars(kwargs: dict[str, object]) -> None:
 # --- risk_report bundle -------------------------------------------------------
 
 def test_risk_report_keys_and_consistency() -> None:
-    report = risk_report(SYMMETRIC, confidence=0.90)
+    report = risk_report(SYMMETRIC, confidence=0.90, seed=0)
     assert set(report) == {
         "var_historical",
         "es_historical",
         "var_parametric",
         "es_parametric",
+        "var_monte_carlo",
+        "es_monte_carlo",
     }
     # Bundle values match the standalone calls, and ES >= VaR holds per method.
     assert report["var_historical"] == pytest.approx(value_at_risk(SYMMETRIC, 0.90))
@@ -91,8 +93,15 @@ def test_risk_report_keys_and_consistency() -> None:
     assert report["es_parametric"] == pytest.approx(
         expected_shortfall(SYMMETRIC, 0.90, "parametric")
     )
+    assert report["var_monte_carlo"] == pytest.approx(
+        value_at_risk(SYMMETRIC, 0.90, "monte_carlo", seed=0)
+    )
+    assert report["es_monte_carlo"] == pytest.approx(
+        expected_shortfall(SYMMETRIC, 0.90, "monte_carlo", seed=0)
+    )
     assert report["es_historical"] >= report["var_historical"]
     assert report["es_parametric"] >= report["var_parametric"]
+    assert report["es_monte_carlo"] >= report["var_monte_carlo"]
 
 
 # =============================================================================

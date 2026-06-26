@@ -15,7 +15,14 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy.stats import norm
 
-from var_model.var import Method, _normal_params, _quantile, validate_inputs, value_at_risk
+from var_model.var import (
+    Method,
+    _normal_params,
+    _quantile,
+    _simulate_normal,
+    validate_inputs,
+    value_at_risk,
+)
 
 
 def expected_shortfall(
@@ -24,6 +31,9 @@ def expected_shortfall(
     method: Method = "historical",
     horizon: int = 1,
     value: float = 1.0,
+    *,
+    n_sims: int = 100_000,
+    seed: int | None = None,
 ) -> float:
     """Expected Shortfall: the mean loss in the worst ``(1 - confidence)`` tail.
 
@@ -35,6 +45,10 @@ def expected_shortfall(
       ``(1 - confidence)`` quantile — no distributional assumption.
     - **parametric** uses the closed-form normal tail expectation
       ``ES = sigma·phi(z)/(1 - confidence) - mu`` with ``z = Phi^{-1}(c)``.
+    - **monte_carlo** averages the simulated tail; passing the same ``seed`` as
+      the Monte Carlo VaR makes the two share draws (so ``ES >= VaR`` holds).
+
+    ``n_sims`` and ``seed`` apply only to the Monte Carlo method.
     """
     arr = validate_inputs(returns, confidence, horizon, value, method)
     if method == "historical":
@@ -46,6 +60,12 @@ def expected_shortfall(
         z = float(norm.ppf(confidence))
         es = sigma * float(norm.pdf(z)) / (1.0 - confidence) - mu
         return float(es * np.sqrt(horizon) * value)
+    if method == "monte_carlo":
+        mu, sigma = _normal_params(arr)
+        sim = _simulate_normal(mu, sigma, n_sims, seed)
+        q = _quantile(sim, confidence)
+        tail = sim[sim <= q]
+        return float(-tail.mean() * np.sqrt(horizon) * value)
     raise NotImplementedError(f"{method!r} Expected Shortfall is not implemented yet")
 
 
@@ -54,11 +74,24 @@ def risk_report(
     confidence: float = 0.95,
     horizon: int = 1,
     value: float = 1.0,
+    *,
+    n_sims: int = 100_000,
+    seed: int | None = None,
 ) -> dict[str, float]:
-    """Bundle VaR and ES across the implemented methods on the same returns."""
+    """Bundle VaR and ES across all three methods on the same returns.
+
+    The Monte Carlo VaR and ES are given the same ``seed`` so they share draws,
+    keeping the pair self-consistent (``ES >= VaR``).
+    """
     return {
         "var_historical": value_at_risk(returns, confidence, "historical", horizon, value),
         "es_historical": expected_shortfall(returns, confidence, "historical", horizon, value),
         "var_parametric": value_at_risk(returns, confidence, "parametric", horizon, value),
         "es_parametric": expected_shortfall(returns, confidence, "parametric", horizon, value),
+        "var_monte_carlo": value_at_risk(
+            returns, confidence, "monte_carlo", horizon, value, n_sims=n_sims, seed=seed
+        ),
+        "es_monte_carlo": expected_shortfall(
+            returns, confidence, "monte_carlo", horizon, value, n_sims=n_sims, seed=seed
+        ),
     }
