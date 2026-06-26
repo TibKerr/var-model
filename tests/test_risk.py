@@ -152,3 +152,44 @@ def test_parametric_es_at_least_var() -> None:
 def test_parametric_es_requires_at_least_two_returns() -> None:
     with pytest.raises(ValueError, match="at least 2"):
         expected_shortfall([0.01], confidence=0.95, method="parametric")
+
+
+# =============================================================================
+# Monte Carlo Expected Shortfall
+# =============================================================================
+
+def test_mc_es_reference_normal_tail() -> None:
+    sigma = np.sqrt(2.5) * 0.01
+    c = 0.99
+    expected = sigma * norm.pdf(norm.ppf(c)) / (1.0 - c)  # mu = 0
+    mc = expected_shortfall(NORMAL5, confidence=c, method="monte_carlo", n_sims=200_000, seed=0)
+    assert mc == pytest.approx(expected, rel=0.05)
+
+
+def test_mc_es_converges_to_parametric() -> None:
+    rng = np.random.default_rng(13)
+    sample = rng.normal(0.0, 0.02, 5_000)
+    for c in (0.95, 0.99):
+        mc = expected_shortfall(sample, confidence=c, method="monte_carlo", n_sims=200_000, seed=0)
+        parametric = expected_shortfall(sample, confidence=c, method="parametric")
+        assert mc == pytest.approx(parametric, rel=0.04)
+
+
+def test_mc_es_at_least_var_shared_seed() -> None:
+    rng = np.random.default_rng(14)
+    sample = rng.normal(0.0, 0.02, 5_000)
+    for c in (0.90, 0.95, 0.99):
+        es = expected_shortfall(sample, confidence=c, method="monte_carlo", seed=5)
+        var = value_at_risk(sample, confidence=c, method="monte_carlo", seed=5)
+        assert es >= var
+
+
+def test_mc_es_reproducible_with_seed() -> None:
+    a = expected_shortfall(NORMAL5, confidence=0.95, method="monte_carlo", seed=7)
+    b = expected_shortfall(NORMAL5, confidence=0.95, method="monte_carlo", seed=7)
+    assert a == b
+
+
+def test_mc_es_requires_positive_n_sims() -> None:
+    with pytest.raises(ValueError, match="n_sims"):
+        expected_shortfall(NORMAL5, confidence=0.95, method="monte_carlo", n_sims=0, seed=0)
