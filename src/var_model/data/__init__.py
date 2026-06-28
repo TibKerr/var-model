@@ -14,6 +14,7 @@ from var_model.data.database import (
     save_divergence_report,
     save_prices,
 )
+from var_model.data.fetch import fetch_daily_prices, fetch_portfolio_prices
 from var_model.data.schema import Base, MethodResult, Price, Run
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "Price",
     "Run",
     "compute_and_save",
+    "fetch_daily_prices",
+    "fetch_portfolio_prices",
     "init_db",
     "load_prices",
     "load_runs",
