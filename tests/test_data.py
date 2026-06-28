@@ -1,6 +1,7 @@
 """Tests for the SQL persistence layer (in-memory SQLite round-trips)."""
 
 import numpy as np
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
@@ -12,8 +13,10 @@ from var_model.data import (
     Run,
     compute_and_save,
     init_db,
+    load_prices,
     load_runs,
     save_divergence_report,
+    save_prices,
 )
 
 METHODS = {"historical", "parametric", "monte_carlo"}
@@ -83,6 +86,52 @@ def test_load_runs_returns_all_in_order() -> None:
         runs = load_runs(session)
         assert [r.label for r in runs] == ["a", "b"]
         assert all(len(r.results) == 3 for r in runs)
+
+
+def _price_series(start: str = "2024-01-01", n: int = 5, base: float = 100.0) -> pd.Series:
+    idx = pd.bdate_range(start, periods=n)
+    return pd.Series([base + i for i in range(n)], index=idx)
+
+
+def test_save_and_load_prices_round_trip() -> None:
+    prices = {"AAPL": _price_series(base=100.0), "MSFT": _price_series(base=200.0)}
+    with _session() as session:
+        written = save_prices(session, prices)
+        assert written == 10
+        frame = load_prices(session, ["AAPL", "MSFT"])
+        assert list(frame.columns) == ["AAPL", "MSFT"]
+        assert len(frame) == 5
+        assert frame["AAPL"].iloc[0] == pytest.approx(100.0)
+        assert frame["MSFT"].iloc[-1] == pytest.approx(204.0)
+        assert frame.index.is_monotonic_increasing
+
+
+def test_save_prices_is_idempotent_upsert() -> None:
+    with _session() as session:
+        save_prices(session, {"AAPL": _price_series(base=100.0)})
+        # Re-save the same dates with corrected closes: update, not duplicate.
+        save_prices(session, {"AAPL": _price_series(base=150.0)})
+        frame = load_prices(session, ["AAPL"])
+        assert len(frame) == 5  # no duplicate rows
+        assert frame["AAPL"].iloc[0] == pytest.approx(150.0)
+
+
+def test_load_prices_drops_unaligned_dates() -> None:
+    # AAPL has 5 days, MSFT only 3; load aligns and drops the unmatched dates.
+    with _session() as session:
+        save_prices(
+            session,
+            {"AAPL": _price_series(n=5, base=100.0), "MSFT": _price_series(n=3, base=200.0)},
+        )
+        frame = load_prices(session, ["AAPL", "MSFT"])
+        assert len(frame) == 3
+        assert not frame.isna().any().any()
+
+
+def test_load_prices_empty_returns_empty_frame() -> None:
+    with _session() as session:
+        frame = load_prices(session, ["NONE"])
+        assert frame.empty
 
 
 def test_duplicate_method_violates_unique_constraint() -> None:
