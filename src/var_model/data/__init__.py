@@ -5,10 +5,22 @@ This package owns everything that touches the database. The math core
 here; persistence consumes the plain result dicts the core produces.
 """
 
+from var_model.data.database import (
+    compute_and_save,
+    init_db,
+    load_runs,
+    make_engine,
+    save_divergence_report,
+)
 from var_model.data.schema import Base, MethodResult, Run
 
 __all__ = [
     "Base",
     "MethodResult",
     "Run",
+    "compute_and_save",
+    "init_db",
+    "load_runs",
+    "make_engine",
+    "save_divergence_report",
 ]
