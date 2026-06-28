@@ -268,3 +268,56 @@ tail. The test suite asserts both directions of this equivalence.
 **Degenerate guard.** Zero-variance returns have no shape; diagnostics return
 neutral values (zero skew/kurtosis, JB p-value 1.0) and the spread is zero rather
 than dividing by zero.
+
+---
+
+## Phase 3 — milestone B: writing results back to SQL
+
+The `data/` package is the I/O layer. It is the **only** part of the codebase
+that imports SQLAlchemy; the math core never does, which is what keeps the core
+testable without a database. Persistence consumes the plain result dicts the core
+produces.
+
+**Schema — normalized, comparison-friendly.** Two tables:
+
+- `runs` — one row per analysis: the *parameters* it used (confidence, horizon,
+  value, n_sims, seed, label), the *diagnostics* (mean, std, skew, excess
+  kurtosis, Jarque-Bera + p-value), and the *spreads* (absolute and relative for
+  VaR and ES). Everything needed to interpret a run lives on its row.
+- `method_results` — three rows per run (historical, parametric, monte_carlo),
+  each with that method's VaR and ES, under a `UNIQUE(run_id, method)`
+  constraint so a method can't be double-recorded for a run.
+
+Splitting per-method results into their own table (rather than twelve columns on
+`runs`) means cross-run, cross-method queries are natural SQL — "show 99% ES by
+method over the last N runs" is a simple join — which is the whole point of
+persisting results: comparison over time.
+
+**Compute/IO separation, with a convenience.** `save_divergence_report` persists
+an *already-computed* dict, so computation and storage stay independent and each
+is testable alone. `compute_and_save` is the end-to-end one-liner
+(`divergence_report` → save) for the common case. The data layer may import the
+core (`divergence`); the core never imports the data layer.
+
+**Connection config.** `make_engine` resolves the database URL from an explicit
+argument, then the `VAR_MODEL_DB_URL` environment variable, then a default local
+SQLite file — the same env-first pattern used for the Alpha Vantage key. Tests
+use in-memory SQLite, create the tables with `init_db`, and assert a true
+round-trip by expiring the session so reads come from the database, not the
+identity map.
+
+**Scope note.** This stores *computed results*. Persisting raw prices and the
+returns derived from them belongs with the Alpha Vantage ingestion layer (a later
+phase); the schema here is deliberately about risk outputs, not market data.
+
+---
+
+## Phase 3 complete — ensemble, comparison, and persistence
+
+The three methods are now pulled together by `divergence_report`, which quantifies
+their spread and computes the diagnostics that explain it, and results are written
+back to SQL for cross-run comparison. The headline deliverable — *why the methods
+diverge* — is both computed (skew, kurtosis, Jarque-Bera) and documented, with the
+test suite enforcing the causal equivalence in both directions. What remains is the
+Alpha Vantage ingestion layer and wiring the CLI into the full
+fetch → compute → persist pipeline.
