@@ -222,3 +222,49 @@ fat-tailed data historical pulls away from parametric and (Gaussian) Monte Carlo
 in the deep tail, with the gap widening at higher confidence and largest for ES.
 The dedicated divergence-analysis tool and the data/persistence layer build on
 this foundation.
+
+---
+
+## Phase 3 — milestone A: the divergence analysis (the headline)
+
+`divergence.py` is where the three methods stop being parallel computations and
+become a *comparison*. It is still pure `numpy`/`scipy`; it adds two things on
+top of `risk_report`.
+
+**1. Spread — how far apart are the methods?** For VaR and for ES,
+`divergence_report` records the absolute spread (`max - min` across the three
+methods) and a relative spread normalized by the most conservative estimate. The
+relative spread is the single number that answers "do the methods agree here?" —
+~0 means yes, and it grows precisely when the normal assumption fails.
+
+**2. Diagnostics — *why* do they diverge?** This is the deliverable the project
+is built around, so the explanation is computed, not just asserted:
+
+- **Skewness.** The normal is symmetric; real equity returns are usually
+  left-skewed. Parametric/MC cannot represent skew; historical can. Non-zero skew
+  is one driver of divergence.
+- **Excess kurtosis (Fisher).** A normal scores 0. Positive excess kurtosis =
+  fat tails = more extreme moves than `z·sigma` admits. This is the *primary*
+  driver: it is why historical VaR/ES exceed the normal-based methods at high
+  confidence, and why the gap is largest for ES (which averages the very tail
+  where fat tails dominate).
+- **Jarque-Bera test.** Combines skew and kurtosis into one normality test. A
+  p-value below `NORMALITY_ALPHA` (0.05) is the formal signal that parametric and
+  Monte Carlo are operating outside their assumptions and should be read as
+  *lower bounds* on tail risk. On genuinely normal data the test does not reject
+  and the spread is small — the two facts move together, which is the thesis.
+
+**Why the diagnostics live with the comparison, not the methods.** Each method is
+deliberately ignorant of the others (that independence is what makes their
+agreement meaningful). The judgement about *which* to trust, and why, belongs in
+a layer above them — `divergence.py` — keeping the method cores clean.
+
+**The causal story, stated once.** Methods agree ⇔ returns are ~normal (high JB
+p-value, ~zero skew/excess-kurtosis, small spread). Methods diverge ⇔ returns are
+skewed/fat-tailed (low JB p-value, positive excess kurtosis, large spread), and
+the divergence is directional: **historical ≥ parametric ≈ Gaussian-MC** in the
+tail. The test suite asserts both directions of this equivalence.
+
+**Degenerate guard.** Zero-variance returns have no shape; diagnostics return
+neutral values (zero skew/kurtosis, JB p-value 1.0) and the spread is zero rather
+than dividing by zero.
