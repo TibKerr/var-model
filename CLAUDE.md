@@ -16,7 +16,9 @@ comparison.
 The Alpha Vantage key is read from the `ALPHAVANTAGE_API_KEY` environment
 variable (loaded from a git-ignored `.env` via `python-dotenv` in dev) — never
 hard-coded or committed. The free tier is rate-limited (~5 req/min, ~25/day), so
-the data layer throttles and caches to the DB.
+the data layer throttles and caches to the DB. `TIME_SERIES_DAILY` is also capped
+at `outputsize=compact` (~100 points) on the free tier — `full` is premium — so
+`compact` is the default, with a CLI `--full` flag for premium keys.
 
 ## Commands
 

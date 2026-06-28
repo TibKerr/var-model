@@ -14,7 +14,7 @@ Each phase appends its own section as its logic lands.
 | 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall | done |
 | 3 | Divergence analysis (ensemble/comparison) + SQL persistence | done |
 | 3.5 | Closing the loop: Alpha Vantage ingestion, returns/portfolio, CLI | done |
-| 4 | (next) | — |
+| 4 | Validation against real portfolio data + README | done |
 
 ---
 
@@ -396,3 +396,74 @@ comparison; `var-model run --no-fetch` and `var-model history` work entirely off
 the cache. Prices and returns are cached idempotently, results are persisted for
 cross-run comparison, and the whole pipeline is tested without touching the
 network. The pure `numpy`/`scipy` core remains free of any I/O.
+
+---
+
+## Phase 4 — validation against real portfolio data
+
+The first live run validated the whole stack end to end and turned up one real
+constraint.
+
+**Free-tier constraint found in flight.** `outputsize=full` is now a premium
+feature for `TIME_SERIES_DAILY`; the free tier returns an `Information` message
+instead of data. The parser surfaced Alpha Vantage's own message verbatim (the
+error handling working as designed), and the default was changed to `compact`
+(~100 points), with `--full` left available for premium keys. *Consequence:* the
+free-tier window is ~100 trading days, not the aspirational ~504.
+
+**The run (AAPL/JPM/XOM/JNJ/PG, equal weight, ~99 returns, $1M):**
+
+| Confidence | Historical VaR | Parametric VaR | Monte Carlo VaR |
+|---|---|---|---|
+| 95% | 12,475 | 11,557 | 11,565 |
+| 99% | 14,670 | 16,422 | 16,551 |
+
+Portfolio character over the window: annualized vol ~11.3% (daily σ 0.71%),
+skewness −0.21 (mild left skew), excess kurtosis −0.28 (slightly *thin*-tailed),
+Jarque-Bera p = 0.60 (normality not rejected).
+
+**The math is verified.** Hand-computing the parametric formula and the empirical
+quantile directly from the cached returns reproduces the stored numbers exactly,
+confirming the fetch → returns → portfolio → VaR pipeline is wired correctly on
+real data.
+
+**The numbers make intuitive sense.** ES ≥ VaR throughout; VaR and ES are both
+monotone in confidence; ES/VaR ≈ 1.26 at 95% (right at the normal value). The
+three methods agree within ~11%, which is exactly what JB p = 0.60 predicts —
+the headline equivalence (*methods agree ⇔ returns ≈ normal*) holds on live data,
+not just synthetic.
+
+**The instructive finding: a 95% ↔ 99% cross-over.**
+
+- At **95%** historical is the *highest* (12,475 vs ~11,560): the empirical
+  5th-percentile loss is lifted by the mild **left skew**, which the symmetric
+  parametric/Monte Carlo methods cannot represent.
+- At **99%** historical is the *lowest* (14,670 vs ~16,500): there the
+  normal-based methods **extrapolate** the tail (`z = 2.33·σ`), while historical
+  just reads the data — and with **thin tails** the empirical 1st-percentile is
+  milder than the normal extrapolation.
+
+This single portfolio shows both directions of divergence: historical tracks the
+*actual* shape (skew, thin tails), the normal-based methods track an *assumed*
+one. It is the project's thesis confirmed on real data.
+
+**Caveat — small-sample tail.** With only ~99 observations the 99% historical
+estimate interpolates between the single worst and second-worst days: coarse and
+fragile. At 99% on free-tier data, historical is the *least* trustworthy of the
+three; at 95% all three rest on solid footing. This is the documented
+"historical is hostage to its window" limitation, made acute by the 100-point
+cap. Two remedies without paying: the price cache **accumulates** across daily
+runs (idempotent upserts grow the history past 100 points over time), and a
+premium key unlocks `--full` for an immediate deep window.
+
+---
+
+## Project status: complete
+
+All planned phases are done — scaffold, the three methods + ES, the divergence
+analysis, SQL persistence, live ingestion + CLI, and validation on real data —
+with a green five-pillar test suite throughout and the pure core kept free of
+I/O. Natural extensions (not required by the original goals) are noted across
+these design sections: a fat-tailed or bootstrap Monte Carlo generator, multi-day
+compounded simulation paths, split/dividend-adjusted prices, and custom
+portfolio weights.

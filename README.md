@@ -92,6 +92,14 @@ Fetching requires `ALPHAVANTAGE_API_KEY` in `.env` (see Configuration). Because
 the free tier is limited to ~25 requests/day, `--no-fetch` reuses the cached
 prices once you have pulled them.
 
+> **Free-tier history limit.** Alpha Vantage's free `TIME_SERIES_DAILY` returns
+> only the last ~100 trading days (`outputsize=full` is a premium feature). That
+> is enough for a stable 95% estimate but makes the 99% historical tail coarse
+> (it leans on the worst one or two days). Two ways to deepen the window:
+> prices are cached idempotently, so running regularly **accumulates** history
+> past 100 points over time; or use `--full` with a premium key for an immediate
+> long history.
+
 ## Project status
 
 All phases complete: scaffold; historical, parametric, and Monte Carlo VaR + ES;
