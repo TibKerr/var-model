@@ -42,6 +42,28 @@ class Price(Base):
         return f"Price(ticker={self.ticker!r}, date={self.date!r}, close={self.close!r})"
 
 
+class Return(Base):
+    """One daily log return for one ticker, derived from the cached prices.
+
+    Persisted as a convenience/audit artifact (the project stores both raw
+    prices and computed returns); the prices table remains the source of truth.
+    """
+
+    __tablename__ = "returns"
+    __table_args__ = (UniqueConstraint("ticker", "date", name="uq_return_ticker_date"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    log_return: Mapped[float]
+
+    def __repr__(self) -> str:
+        return (
+            f"Return(ticker={self.ticker!r}, date={self.date!r}, "
+            f"log_return={self.log_return!r})"
+        )
+
+
 class Run(Base):
     __tablename__ = "runs"
 

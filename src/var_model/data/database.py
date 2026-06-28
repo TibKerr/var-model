@@ -16,7 +16,7 @@ from numpy.typing import ArrayLike
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
-from var_model.data.schema import Base, MethodResult, Price, Run
+from var_model.data.schema import Base, MethodResult, Price, Return, Run
 from var_model.divergence import divergence_report
 
 DEFAULT_DB_URL = "sqlite:///var_model.db"
@@ -157,13 +157,58 @@ def load_prices(session: Session, tickers: list[str]) -> pd.DataFrame:
     return wide.reindex(columns=tickers).sort_index().dropna()
 
 
+def save_returns(session: Session, returns: pd.DataFrame) -> int:
+    """Upsert per-asset daily log returns from a wide (date x ticker) frame.
+
+    Mirrors :func:`save_prices`: existing (ticker, date) rows are updated in
+    place. Returns the number of rows written.
+    """
+    written = 0
+    for ticker in returns.columns:
+        name = str(ticker)
+        existing = {
+            row.date: row
+            for row in session.scalars(select(Return).where(Return.ticker == name))
+        }
+        for raw_date, value in returns[ticker].items():
+            day = pd.Timestamp(str(raw_date)).date()
+            row = existing.get(day)
+            if row is None:
+                session.add(Return(ticker=name, date=day, log_return=float(value)))
+            else:
+                row.log_return = float(value)
+            written += 1
+    session.commit()
+    return written
+
+
+def load_returns(session: Session, tickers: list[str]) -> pd.DataFrame:
+    """Load stored log returns for ``tickers`` as a wide, aligned DataFrame."""
+    stmt = select(Return).where(Return.ticker.in_(tickers)).order_by(Return.date)
+    rows = session.scalars(stmt).all()
+    if not rows:
+        return pd.DataFrame(columns=tickers)
+    frame = pd.DataFrame(
+        {
+            "date": [r.date for r in rows],
+            "ticker": [r.ticker for r in rows],
+            "log_return": [r.log_return for r in rows],
+        }
+    )
+    wide = frame.pivot(index="date", columns="ticker", values="log_return")
+    wide.index = pd.to_datetime(wide.index)
+    return wide.reindex(columns=tickers).sort_index().dropna()
+
+
 __all__ = [
     "DEFAULT_DB_URL",
     "compute_and_save",
     "init_db",
     "load_prices",
+    "load_returns",
     "load_runs",
     "make_engine",
     "save_divergence_report",
     "save_prices",
+    "save_returns",
 ]
