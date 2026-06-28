@@ -50,14 +50,3 @@ uv run ruff check .   # lint
 uv run mypy           # type check
 uv run pytest -q      # tests
 ```
-
-## Project status
-
-Built in discrete phases (see `DESIGN.md` for the rationale behind each):
-
-1. **Scaffold** — uv, src layout, tooling, CI. ✅
-2. Database schema + Alpha Vantage ingestion.
-3. VaR core: historical, variance-covariance, Monte Carlo.
-4. Expected Shortfall.
-5. Divergence analysis.
-6. Final testing, cleanup, documentation.
