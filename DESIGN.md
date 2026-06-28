@@ -13,7 +13,8 @@ Each phase appends its own section as its logic lands.
 | 1 | Project scaffold (uv, src layout, CI, tooling) | done |
 | 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall | done |
 | 3 | Divergence analysis (ensemble/comparison) + SQL persistence | done |
-| 4 | Alpha Vantage ingestion, returns/portfolio, end-to-end CLI | done |
+| 3.5 | Closing the loop: Alpha Vantage ingestion, returns/portfolio, CLI | done |
+| 4 | (next) | — |
 
 ---
 
@@ -333,9 +334,9 @@ fetch → compute → persist pipeline.
 
 ---
 
-## Phase 4 — ingestion, returns, and the end-to-end CLI
+## Closing the loop — ingestion, returns, and the end-to-end CLI
 
-This closes the loop: real prices in, a stored, explained risk comparison out.
+Real prices in, a stored, explained risk comparison out.
 
 **Alpha Vantage ingestion (`data/fetch.py`).** The only network code in the
 project. It calls the free `TIME_SERIES_DAILY` endpoint with `requests` and
@@ -388,7 +389,7 @@ varied tail behaviour and the divergence story has something to show. A ~504-day
 
 ---
 
-## Phase 4 complete — the loop is closed
+## The loop is closed
 
 `var-model run` now goes from live tickers to a stored, explained risk
 comparison; `var-model run --no-fetch` and `var-model history` work entirely off
