@@ -14,9 +14,11 @@ from var_model.data import (
     compute_and_save,
     init_db,
     load_prices,
+    load_returns,
     load_runs,
     save_divergence_report,
     save_prices,
+    save_returns,
 )
 
 METHODS = {"historical", "parametric", "monte_carlo"}
@@ -132,6 +134,31 @@ def test_load_prices_empty_returns_empty_frame() -> None:
     with _session() as session:
         frame = load_prices(session, ["NONE"])
         assert frame.empty
+
+
+def test_save_and_load_returns_round_trip() -> None:
+    idx = pd.bdate_range("2024-01-01", periods=4)
+    df = pd.DataFrame(
+        {"AAPL": [0.01, -0.02, 0.03, 0.0], "JPM": [0.0, 0.01, -0.01, 0.02]}, index=idx
+    )
+    with _session() as session:
+        written = save_returns(session, df)
+        assert written == 8
+        loaded = load_returns(session, ["AAPL", "JPM"])
+        assert list(loaded.columns) == ["AAPL", "JPM"]
+        assert len(loaded) == 4
+        assert loaded["AAPL"].iloc[1] == pytest.approx(-0.02)
+        assert loaded["JPM"].iloc[-1] == pytest.approx(0.02)
+
+
+def test_save_returns_is_idempotent_upsert() -> None:
+    idx = pd.bdate_range("2024-01-01", periods=2)
+    with _session() as session:
+        save_returns(session, pd.DataFrame({"AAPL": [0.01, 0.02]}, index=idx))
+        save_returns(session, pd.DataFrame({"AAPL": [0.05, 0.06]}, index=idx))
+        loaded = load_returns(session, ["AAPL"])
+        assert len(loaded) == 2
+        assert loaded["AAPL"].iloc[0] == pytest.approx(0.05)
 
 
 def test_duplicate_method_violates_unique_constraint() -> None:
