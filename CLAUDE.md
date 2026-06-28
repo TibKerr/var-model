@@ -53,26 +53,25 @@ The design deliberately separates a **pure math core** from an **I/O layer**:
   network, no database. This is what makes the math testable against synthetic
   distributions with no external dependencies. *Keep it that way:* do not import
   `requests` or `sqlalchemy` into these modules even though they are installed.
-- **I/O layer** (`data/`) owns everything that touches the network or disk:
-  SQLAlchemy models/session (`data/schema.py`, `data/database.py`, built) and
-  Alpha Vantage ingestion (`requests`, **not yet built**). Note: this `data/`
-  package is the *database access layer* (code), distinct from any folder of
-  market data.
-- **CLI** (`cli.py`) stays thin — it parses arguments and delegates to the core
-  and data layers. No business logic. Currently a **scaffold** (`--version`/help
-  only); not yet wired to the fetch → compute → persist pipeline.
+- **I/O + data-prep layer** (`data/`) owns everything that touches the network,
+  disk, or pandas: SQLAlchemy models/session (`schema.py`, `database.py`), Alpha
+  Vantage ingestion (`fetch.py`, `requests`), price→return/portfolio computation
+  (`returns.py`, pandas), and the cross-layer orchestration (`pipeline.py`).
+  Note: this `data/` package is the *data access/prep layer* (code), distinct
+  from any folder of market data.
+- **CLI** (`cli.py`) stays thin — it parses arguments, calls `pipeline`, and
+  formats output. No business logic. Subcommands: `run` (fetch→compute→persist→
+  print) and `history`.
 
 All dependencies are a single required runtime set (numpy, scipy, pandas,
 sqlalchemy, requests, python-dotenv); the core/IO separation is enforced by module
 responsibility at the code level, not by packaging extras.
 
-> Phase status (see `DESIGN.md` for the rationale behind each):
-> - **Done:** scaffold; all three VaR methods + ES (`var.py`, `risk.py`); the
->   divergence/comparison layer (`divergence.py`); SQL persistence of results
->   (`data/schema.py`, `data/database.py`). Full test suite (five pillars per
->   module).
-> - **Remaining:** Alpha Vantage ingestion (`data/`), wiring the thin CLI into
->   the end-to-end pipeline, and later phases.
+> Phase status (see `DESIGN.md` for the rationale behind each): **all phases
+> complete** — scaffold; the three VaR methods + ES (`var.py`, `risk.py`); the
+> divergence/comparison layer (`divergence.py`); SQL persistence; Alpha Vantage
+> ingestion, returns/portfolio computation, and the end-to-end CLI (`data/`,
+> `cli.py`). Full five-pillar test suite throughout.
 
 ## Working conventions (important — this project has strict process rules)
 

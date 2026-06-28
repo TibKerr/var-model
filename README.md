@@ -74,19 +74,29 @@ with Session(engine) as session:
 
 ### Command line
 
+The CLI runs the full pipeline: fetch prices → compute returns → VaR/ES three
+ways → store the result → print the comparison.
+
 ```
-uv run var-model --help
+# Fetch the default portfolio (AAPL JPM XOM JNJ PG) and store a 99% run
+uv run var-model run -c 0.99 --value 1000000 --label "first run"
+
+# Re-run entirely from cached prices (no API call) on a custom portfolio
+uv run var-model run --no-fetch --tickers AAPL MSFT --seed 0
+
+# List previously stored runs
+uv run var-model history
 ```
 
-> The CLI is currently a scaffold (`--version`/help). Wiring it into the full
-> fetch → compute → persist pipeline lands with the Alpha Vantage ingestion
-> layer.
+Fetching requires `ALPHAVANTAGE_API_KEY` in `.env` (see Configuration). Because
+the free tier is limited to ~25 requests/day, `--no-fetch` reuses the cached
+prices once you have pulled them.
 
 ## Project status
 
-- **Done:** project scaffold; historical, parametric, and Monte Carlo VaR + ES;
-  the divergence/comparison analysis; SQL persistence of results.
-- **Next:** Alpha Vantage ingestion and the end-to-end CLI.
+All phases complete: scaffold; historical, parametric, and Monte Carlo VaR + ES;
+the divergence/comparison analysis; SQL persistence; Alpha Vantage ingestion and
+the end-to-end CLI.
 
 See `DESIGN.md` for the rationale behind each phase.
 

@@ -13,7 +13,7 @@ Each phase appends its own section as its logic lands.
 | 1 | Project scaffold (uv, src layout, CI, tooling) | done |
 | 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall | done |
 | 3 | Divergence analysis (ensemble/comparison) + SQL persistence | done |
-| — | Alpha Vantage ingestion + end-to-end CLI | next |
+| 4 | Alpha Vantage ingestion, returns/portfolio, end-to-end CLI | done |
 
 ---
 
@@ -330,3 +330,68 @@ diverge* — is both computed (skew, kurtosis, Jarque-Bera) and documented, with
 test suite enforcing the causal equivalence in both directions. What remains is the
 Alpha Vantage ingestion layer and wiring the CLI into the full
 fetch → compute → persist pipeline.
+
+---
+
+## Phase 4 — ingestion, returns, and the end-to-end CLI
+
+This closes the loop: real prices in, a stored, explained risk comparison out.
+
+**Alpha Vantage ingestion (`data/fetch.py`).** The only network code in the
+project. It calls the free `TIME_SERIES_DAILY` endpoint with `requests` and
+returns closes as pandas Series.
+
+- **Free endpoint, documented limitation.** The split/dividend-*adjusted*
+  endpoint is premium, so we use raw `TIME_SERIES_DAILY`. Corporate actions are
+  therefore not adjusted for; acceptable for a methods-comparison tool, and noted
+  here rather than hidden.
+- **Key handling.** Read from `ALPHAVANTAGE_API_KEY` (or passed explicitly),
+  never hard-coded; a missing key raises a clear error.
+- **Rate limiting.** Free tier is ~5 req/min, so multi-ticker fetches sleep ~12s
+  between calls. Alpha Vantage signals throttling/errors in the JSON body (not
+  HTTP status), so the parser surfaces `Note`/`Information`/`Error Message`
+  verbatim as a `RuntimeError`.
+- **Testability.** The HTTP client is injectable, so the whole layer is tested
+  against canned payloads with no network and no rate-limit exposure.
+
+**Returns and portfolio aggregation (`data/returns.py`).** Prices → per-asset
+**log returns** → one **equal-weight** portfolio series. The portfolio return is
+the weighted sum of asset log returns — the standard daily-horizon approximation
+(exact under continuous compounding), which also keeps the portfolio a linear
+combination of the assets, matching the variance-covariance mental model. This is
+data-prep (pandas) and lives in the data layer, *not* the pure math core.
+
+**Prices vs. returns persistence — single source of truth.** Both raw prices and
+computed returns are cached (a stated project goal), but **prices are the source
+of truth**: returns are derived from them and stored only as a convenience/audit
+artifact. The unique `(ticker, date)` constraint on both tables makes ingestion
+**idempotent** — a re-run upserts rather than duplicating, so it never re-spends
+the API budget or corrupts the cache.
+
+**Orchestration (`data/pipeline.py`).** `run_portfolio_analysis` is the single
+place that spans both layers: fetch (or reuse cache) → save prices → log returns
+→ save returns → equal-weight portfolio → trailing window → `compute_and_save`.
+Keeping it here lets the CLI stay thin and keeps the math core ignorant of I/O.
+
+**CLI (`cli.py`).** Two subcommands. `run` executes the pipeline and prints the
+three-method comparison, the spread, and a plain-language normality verdict
+(JB p < 0.05 → "methods expected to diverge"); `history` lists stored runs.
+`--no-fetch` runs entirely off the cache (useful when the daily API budget is
+spent), and `--db` selects the database. `.env` is loaded on startup so the key
+is available. The CLI does no math — it parses, delegates to the pipeline, and
+formats.
+
+**Default portfolio (`config.py`).** AAPL / JPM / XOM / JNJ / PG — deliberately
+cross-sector (tech, financials, energy, healthcare, staples) so the returns carry
+varied tail behaviour and the divergence story has something to show. A ~504-day
+(~2-year) trailing window gives the 99% historical tail enough observations.
+
+---
+
+## Phase 4 complete — the loop is closed
+
+`var-model run` now goes from live tickers to a stored, explained risk
+comparison; `var-model run --no-fetch` and `var-model history` work entirely off
+the cache. Prices and returns are cached idempotently, results are persisted for
+cross-run comparison, and the whole pipeline is tested without touching the
+network. The pure `numpy`/`scipy` core remains free of any I/O.
