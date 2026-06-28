@@ -67,6 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="fetch",
         help="use only cached prices; do not call Alpha Vantage",
     )
+    run.add_argument(
+        "--full",
+        action="store_const",
+        const="full",
+        default="compact",
+        dest="outputsize",
+        help="request full history (premium key required; free tier is compact/100 points)",
+    )
 
     sub.add_parser("history", parents=[common], help="list previously stored runs")
     return parser
@@ -104,6 +112,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             session,
             args.tickers,
             fetch=args.fetch,
+            outputsize=args.outputsize,
             confidence=args.confidence,
             horizon=args.horizon,
             value=args.value,

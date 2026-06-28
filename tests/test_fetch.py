@@ -54,6 +54,12 @@ def test_parses_closes_sorted_ascending() -> None:
     assert series.iloc[1] == pytest.approx(102.0)
     assert series.name == "AAPL"
     assert client.calls[0]["function"] == "TIME_SERIES_DAILY"
+    assert client.calls[0]["outputsize"] == "compact"  # free-tier default
+
+
+def test_outputsize_is_passed_through() -> None:
+    client = _FakeClient({"AAPL": _payload({"2024-01-02": 10.0})})
+    fetch_daily_prices("AAPL", api_key="demo", outputsize="full", client=client)
     assert client.calls[0]["outputsize"] == "full"
 
 

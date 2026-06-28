@@ -65,16 +65,16 @@ def fetch_daily_prices(
     ticker: str,
     *,
     api_key: str | None = None,
-    outputsize: str = "full",
+    outputsize: str = "compact",
     client: _Getter | None = None,
     timeout: float = 30.0,
 ) -> pd.Series:
     """Fetch the daily closing-price series for one ticker.
 
-    ``outputsize`` is ``"full"`` (full history) or ``"compact"`` (last 100 days).
-    ``client`` defaults to ``requests``; tests inject a double. Raises
-    ``RuntimeError`` with Alpha Vantage's message on an error or rate-limit
-    response.
+    ``outputsize`` is ``"compact"`` (last 100 points; the default and the only
+    free-tier option) or ``"full"`` (full history, a premium feature). ``client``
+    defaults to ``requests``; tests inject a double. Raises ``RuntimeError`` with
+    Alpha Vantage's message on an error or rate-limit response.
     """
     key = _resolve_key(api_key)
     params = {
@@ -95,7 +95,7 @@ def fetch_portfolio_prices(
     tickers: Iterable[str],
     *,
     api_key: str | None = None,
-    outputsize: str = "full",
+    outputsize: str = "compact",
     client: _Getter | None = None,
     throttle: bool = True,
     sleep_seconds: float = RATE_LIMIT_SLEEP_SECONDS,

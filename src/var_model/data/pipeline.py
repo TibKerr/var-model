@@ -36,6 +36,7 @@ def run_portfolio_analysis(
     fetch: bool = True,
     api_key: str | None = None,
     client: _Getter | None = None,
+    outputsize: str = "compact",
     confidence: float = DEFAULT_CONFIDENCE,
     horizon: int = DEFAULT_HORIZON,
     value: float = DEFAULT_VALUE,
@@ -54,7 +55,10 @@ def run_portfolio_analysis(
     """
     if fetch:
         save_prices(
-            session, fetch_portfolio_prices(tickers, api_key=api_key, client=client)
+            session,
+            fetch_portfolio_prices(
+                tickers, api_key=api_key, client=client, outputsize=outputsize
+            ),
         )
 
     prices = load_prices(session, list(tickers))
