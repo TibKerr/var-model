@@ -17,6 +17,7 @@ from var_model.data.database import (
     save_returns,
 )
 from var_model.data.fetch import fetch_daily_prices, fetch_portfolio_prices
+from var_model.data.pipeline import run_portfolio_analysis
 from var_model.data.returns import log_returns, portfolio_returns
 from var_model.data.schema import Base, MethodResult, Price, Return, Run
 
@@ -36,6 +37,7 @@ __all__ = [
     "log_returns",
     "make_engine",
     "portfolio_returns",
+    "run_portfolio_analysis",
     "save_divergence_report",
     "save_prices",
     "save_returns",
