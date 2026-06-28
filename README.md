@@ -23,6 +23,11 @@ ALPHAVANTAGE_API_KEY=your_key_here
 > The free tier allows ~5 requests/minute and ~25/day, so the data layer
 > throttles requests and caches fetched data to the database.
 
+> yFinance is a suitable alternative should request limits become a problem. However,
+ due to the nature of yFinance being a scraper, Yahoo changing their website endpoints
+ temporarily breaks the package. So, AlphaVantage's reliability was more important than unlimited
+ pulls.
+
 ## Install
 
 ```
