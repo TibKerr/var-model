@@ -12,6 +12,9 @@ wheels/
 # Secrets / local config (never commit the real key)
 .env
 
+# Local agent guidance (kept on disk, not tracked)
+CLAUDE.md
+
 # Test / type-check caches
 .pytest_cache/
 .mypy_cache/
