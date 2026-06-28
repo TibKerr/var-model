@@ -8,19 +8,24 @@ here; persistence consumes the plain result dicts the core produces.
 from var_model.data.database import (
     compute_and_save,
     init_db,
+    load_prices,
     load_runs,
     make_engine,
     save_divergence_report,
+    save_prices,
 )
-from var_model.data.schema import Base, MethodResult, Run
+from var_model.data.schema import Base, MethodResult, Price, Run
 
 __all__ = [
     "Base",
     "MethodResult",
+    "Price",
     "Run",
     "compute_and_save",
     "init_db",
+    "load_prices",
     "load_runs",
     "make_engine",
     "save_divergence_report",
+    "save_prices",
 ]

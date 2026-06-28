@@ -12,14 +12,34 @@ These are pure data definitions; engine/session handling lives in ``database``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class Price(Base):
+    """One daily closing price for one ticker.
+
+    The cache of raw market data pulled from Alpha Vantage. A unique
+    (ticker, date) constraint lets ingestion upsert idempotently so a re-run
+    does not duplicate rows or re-spend the API budget.
+    """
+
+    __tablename__ = "prices"
+    __table_args__ = (UniqueConstraint("ticker", "date", name="uq_ticker_date"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    close: Mapped[float]
+
+    def __repr__(self) -> str:
+        return f"Price(ticker={self.ticker!r}, date={self.date!r}, close={self.close!r})"
 
 
 class Run(Base):

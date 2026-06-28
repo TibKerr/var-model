@@ -9,12 +9,14 @@ is the end-to-end convenience that runs the analysis and stores it in one call.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
+import pandas as pd
 from numpy.typing import ArrayLike
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
-from var_model.data.schema import Base, MethodResult, Run
+from var_model.data.schema import Base, MethodResult, Price, Run
 from var_model.divergence import divergence_report
 
 DEFAULT_DB_URL = "sqlite:///var_model.db"
@@ -105,3 +107,63 @@ def compute_and_save(
 def load_runs(session: Session) -> list[Run]:
     """Return all persisted runs, oldest first."""
     return list(session.scalars(select(Run).order_by(Run.created_at, Run.id)))
+
+
+def save_prices(session: Session, prices: Mapping[str, pd.Series]) -> int:
+    """Upsert daily closing prices, keyed by ticker.
+
+    ``prices`` maps each ticker to a Series of closes indexed by date. Existing
+    (ticker, date) rows are updated in place rather than duplicated, so ingestion
+    is idempotent. Returns the number of rows inserted or updated.
+    """
+    written = 0
+    for ticker, series in prices.items():
+        existing = {
+            row.date: row
+            for row in session.scalars(select(Price).where(Price.ticker == ticker))
+        }
+        for raw_date, close in series.items():
+            day = pd.Timestamp(str(raw_date)).date()
+            row = existing.get(day)
+            if row is None:
+                session.add(Price(ticker=ticker, date=day, close=float(close)))
+            else:
+                row.close = float(close)
+            written += 1
+    session.commit()
+    return written
+
+
+def load_prices(session: Session, tickers: list[str]) -> pd.DataFrame:
+    """Load stored closes for ``tickers`` as a wide DataFrame.
+
+    Index is the date, one column per ticker (ordered as requested), sorted
+    ascending. Rows where any requested ticker is missing are dropped so the
+    frame is aligned and ready for return computation.
+    """
+    stmt = select(Price).where(Price.ticker.in_(tickers)).order_by(Price.date)
+    rows = session.scalars(stmt).all()
+    if not rows:
+        return pd.DataFrame(columns=tickers)
+    frame = pd.DataFrame(
+        {
+            "date": [r.date for r in rows],
+            "ticker": [r.ticker for r in rows],
+            "close": [r.close for r in rows],
+        }
+    )
+    wide = frame.pivot(index="date", columns="ticker", values="close")
+    wide.index = pd.to_datetime(wide.index)
+    return wide.reindex(columns=tickers).sort_index().dropna()
+
+
+__all__ = [
+    "DEFAULT_DB_URL",
+    "compute_and_save",
+    "init_db",
+    "load_prices",
+    "load_runs",
+    "make_engine",
+    "save_divergence_report",
+    "save_prices",
+]
