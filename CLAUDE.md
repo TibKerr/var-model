@@ -36,6 +36,10 @@ The three quality commands (`ruff`, `mypy`, `pytest`) are exactly what
 `.github/workflows/ci.yml` runs — a green local run should mean a green
 pipeline. Run all three before committing.
 
+> If `uv run pytest` fails to spawn on this Windows machine ("Application Control
+> policy has blocked this file"), use `uv run python -m pytest -q` instead — it
+> invokes the same test run without the blocked console-script shim.
+
 ## Architecture
 
 Modern `src` layout: importable code lives under `src/var_model/`, tests at the
@@ -50,17 +54,25 @@ The design deliberately separates a **pure math core** from an **I/O layer**:
   distributions with no external dependencies. *Keep it that way:* do not import
   `requests` or `sqlalchemy` into these modules even though they are installed.
 - **I/O layer** (`data/`) owns everything that touches the network or disk:
-  SQLAlchemy models/session and Alpha Vantage ingestion (`requests`).
+  SQLAlchemy models/session (`data/schema.py`, `data/database.py`, built) and
+  Alpha Vantage ingestion (`requests`, **not yet built**). Note: this `data/`
+  package is the *database access layer* (code), distinct from any folder of
+  market data.
 - **CLI** (`cli.py`) stays thin — it parses arguments and delegates to the core
-  and data layers. No business logic.
+  and data layers. No business logic. Currently a **scaffold** (`--version`/help
+  only); not yet wired to the fetch → compute → persist pipeline.
 
 All dependencies are a single required runtime set (numpy, scipy, pandas,
 sqlalchemy, requests, python-dotenv); the core/IO separation is enforced by module
 responsibility at the code level, not by packaging extras.
 
-> Phase status: the scaffold and CLI exist; `var.py`, `risk.py`, `divergence.py`,
-> and `data/` are added phase by phase. See `DESIGN.md` for the rationale behind
-> each phase and `README.md` for the phase list.
+> Phase status (see `DESIGN.md` for the rationale behind each):
+> - **Done:** scaffold; all three VaR methods + ES (`var.py`, `risk.py`); the
+>   divergence/comparison layer (`divergence.py`); SQL persistence of results
+>   (`data/schema.py`, `data/database.py`). Full test suite (five pillars per
+>   module).
+> - **Remaining:** Alpha Vantage ingestion (`data/`), wiring the thin CLI into
+>   the end-to-end pipeline, and later phases.
 
 ## Working conventions (important — this project has strict process rules)
 

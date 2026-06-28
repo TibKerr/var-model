@@ -36,12 +36,59 @@ uv sync
 
 ## Usage
 
+### Python API
+
+The library is complete for all three methods, Expected Shortfall, the
+comparison layer, and SQL persistence:
+
+```python
+import numpy as np
+from var_model import value_at_risk, risk_report, divergence_report
+
+returns = np.random.default_rng(0).normal(0.0, 0.02, 1000)
+
+# A single method
+value_at_risk(returns, confidence=0.99, method="historical", value=1_000_000)
+
+# VaR + ES across all three methods on the same data
+risk_report(returns, confidence=0.99, value=1_000_000)
+
+# Full comparison: the six numbers, the spread between methods, and the
+# shape diagnostics (skew, excess kurtosis, Jarque-Bera) that explain why
+# the methods diverge
+divergence_report(returns, confidence=0.99, value=1_000_000)
+```
+
+Persist a run to SQL and read runs back:
+
+```python
+from sqlalchemy.orm import Session
+from var_model.data import make_engine, init_db, compute_and_save, load_runs
+
+engine = make_engine()  # VAR_MODEL_DB_URL env var, or a default local SQLite file
+init_db(engine)
+with Session(engine) as session:
+    compute_and_save(session, returns, confidence=0.99, value=1_000_000, label="run-1")
+    runs = load_runs(session)
+```
+
+### Command line
+
 ```
 uv run var-model --help
 ```
 
-> The CLI grows as phases land (data fetch, VaR computation, divergence report).
-> Phase 1 ships the runnable scaffold.
+> The CLI is currently a scaffold (`--version`/help). Wiring it into the full
+> fetch → compute → persist pipeline lands with the Alpha Vantage ingestion
+> layer.
+
+## Project status
+
+- **Done:** project scaffold; historical, parametric, and Monte Carlo VaR + ES;
+  the divergence/comparison analysis; SQL persistence of results.
+- **Next:** Alpha Vantage ingestion and the end-to-end CLI.
+
+See `DESIGN.md` for the rationale behind each phase.
 
 ## Development
 

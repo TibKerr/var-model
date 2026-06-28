@@ -6,6 +6,15 @@ divergence analysis that compares the three VaR methods.
 
 Each phase appends its own section as its logic lands.
 
+**Status at a glance:**
+
+| Phase | Scope | State |
+|---|---|---|
+| 1 | Project scaffold (uv, src layout, CI, tooling) | done |
+| 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall | done |
+| 3 | Divergence analysis (ensemble/comparison) + SQL persistence | done |
+| — | Alpha Vantage ingestion + end-to-end CLI | next |
+
 ---
 
 ## Phase 1 — Project scaffold
