@@ -5,7 +5,7 @@ It leverages the three main methods of calculating VaR independently:
 - Historical
 - Parametric (Variance-Covariance)
 - Monte Carlo
-The divergence of these methods is intended to the headline analysis for this repo.
+The divergence of these methods is intended to be the headline analysis for this repo.
 
 Real market data is acquired through the Alpha Vantage API. Raw prices and
 computed returns are then stored in a SQL database (via SQLAlchemy), and risk
@@ -20,13 +20,7 @@ key — `.env` is git-ignored and must never be committed:
 ALPHAVANTAGE_API_KEY=your_key_here
 ```
 
-> The free tier allows ~5 requests/minute and ~25/day, so the data layer
-> throttles requests and caches fetched data to the database.
-
-> yFinance is a suitable alternative should request limits become a problem. However,
- due to the nature of yFinance being a scraper, Yahoo changing their website endpoints
- temporarily breaks the package. So, AlphaVantage's reliability was more important than unlimited
- pulls.
+> The free tier allows ~5 requests/minute and ~25 requests/day, so the data layer throttles requests and caches fetched data to the database.
 
 ## Install
 
@@ -93,7 +87,7 @@ the free tier is limited to ~25 requests/day, `--no-fetch` reuses the cached
 prices once you have pulled them.
 
 > **Free-tier history limit.** Alpha Vantage's free `TIME_SERIES_DAILY` returns
-> only the last ~100 trading days (`outputsize=full` is a premium feature). That
+> only the last ~100 trading days (`outputsize='full'` is a premium feature). That
 > is enough for a stable 95% estimate but makes the 99% historical tail coarse
 > (it leans on the worst one or two days). Two ways to deepen the window:
 > prices are cached idempotently, so running regularly **accumulates** history

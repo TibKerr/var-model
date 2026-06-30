@@ -1,49 +1,44 @@
 # Design Notes
 
-This document records the *why* behind `var-model` — the design decisions that
-aren't obvious from the code, with particular emphasis (in later phases) on the
-divergence analysis that compares the three VaR methods.
+This document records the decisions behind this repository.
 
 Each phase appends its own section as its logic lands.
 
-**Status at a glance:**
-
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Project scaffold (uv, src layout, CI, tooling) | done |
-| 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall | done |
-| 3 | Divergence analysis (ensemble/comparison) + SQL persistence | done |
-| 3.5 | Closing the loop: Alpha Vantage ingestion, returns/portfolio, CLI | done |
-| 4 | Validation against real portfolio data + README | done |
+| 1 | Project scaffold (uv, src layout, CI, tooling)
+| 2 | Historical, parametric, Monte Carlo VaR + Expected Shortfall
+| 3 | Divergence analysis (ensemble/comparison) + SQL persistence
+| 3.5 | Closing the loop: Alpha Vantage ingestion, returns/portfolio, CLI
+| 4 | Validation against real portfolio data
 
 ---
 
 ## Phase 1 — Project scaffold
 
-**Goal:** a packaged, tested, CI-backed skeleton that the domain code plugs into,
-following a `src`-layout numerical-library template.
+**Goal:** a packaged, tested, Continuous Integration (CI)-backed skeleton that the domain code plugs into. It follows a standard `src`-layout numerical-library template.
 
 **Decisions:**
 
-- **`uv` + `src` layout.** The package lives under `src/var_model/` so it imports
-  only when installed — no `sys.path` hacks, and tests run against the installed
-  package, catching packaging mistakes early. `uv` manages the environment and
+- **`uv` + `src` layout.** The package exists as `src/var_model/`; it imports
+  only when installed. So, there is no `sys.path` hacks, and tests run against the *installed*
+  package. This catches packaging mistakes early. `uv` manages the environment and
   writes a committed `uv.lock` for reproducibility.
 - **Build backend: `hatchling`.** `uv init` defaults to its own `uv_build`
-  backend; we switched to `hatchling` for a more conventional, portable build
-  that doesn't pin the build step to a specific `uv` version.
+  backend; I opted to use `hatchling` for a more conventional, portable build
+  that won't pin the build step to a specific `uv` version.
 - **Single dependency set.** `numpy`, `scipy`, `pandas`, `sqlalchemy`,
-  `requests`, and `python-dotenv` are all required runtime dependencies — one
+  `requests`, and `python-dotenv` are all required runtime dependencies. One
   `uv sync` installs everything. *However,* the math modules (`var.py`,
   `risk.py`) are kept to `numpy`/`scipy` only at the code level so the risk core
-  stays pure and its tests never depend on the network (`requests`) or a
+  stays pure. That way, its tests never depend on the network (`requests`) or a
   database (`sqlalchemy`). The separation is by module responsibility, not by
   package extras.
 - **Tooling:** `ruff` (lint + import sort), `mypy` (types), `pytest` (tests),
-  and a GitHub Actions pipeline that mirrors the local commands, so a green
+  and a GitHub Actions pipeline that mirrors the local commands. This way, a green
   local run should mean a green CI run.
 
-**Verification gate (all must pass before Phase 2):**
+**Verification gate:**
 
 ```
 uv run ruff check .
@@ -52,6 +47,8 @@ uv run pytest -q
 uv run var-model --help
 ```
 
+Do *NOT* move on until each check passes.
+
 ---
 
 ## Data source — Alpha Vantage (chosen over yfinance)
@@ -59,166 +56,173 @@ uv run var-model --help
 **Decision:** market data comes from the **Alpha Vantage** REST API, called
 directly with `requests`, rather than `yfinance`.
 
-**Why:**
+**Reasoning**
 
-- **A real, documented API with an explicit contract.** Alpha Vantage is a
-  first-party data provider with a stable, authenticated REST interface;
-  `yfinance` scrapes an undocumented Yahoo endpoint that breaks without notice.
-- **`requests` over the `alpha_vantage` wrapper.** A single `GET` against a
-  documented endpoint is transparent and dependency-light; the wrapper adds
+- Alpha Vantage is a first-party data provider with a stable, authenticated REST interface;
+  `yfinance` scrapes an undocumented Yahoo endpoint that breaks without notice. The compromise
+  of losing the ease of implementation is less important than having a reliable engine.
+- A single `GET` against a documented endpoint is transparent and dependency-light; the wrapper adds
   indirection without earning its keep for a focused tool.
+- Because data is aggregated in the SQL database (discussed later), the 100 day lookback is no longer a
+  limitation of the AlphaVantage API.
 
-**Consequences this forces on the data layer (Phase 2):**
+**Consequences:**
 
-- **Secret handling.** The key is read from the `ALPHAVANTAGE_API_KEY`
+- Like with any API, the key is read from the `ALPHAVANTAGE_API_KEY`
   environment variable (loaded from a git-ignored `.env` via `python-dotenv` in
   dev). It is never hard-coded, committed, or passed through the math core. A
-  missing key raises a clear error. `.env.example` documents the requirement.
-- **Rate limiting.** The free tier is ~5 requests/minute and ~25/day. Ingestion
+  missing key raises a clear error. `.env.example` documents the requirement for
+  reproducibility.
+- The free tier is ~5 requests/minute and ~25/day. Ingestion
   must throttle (≈12 s between calls) and cache fetched series to the database
   so a re-run doesn't re-spend the daily budget. This shapes the fetch design
   more than `yfinance` did.
 
 ---
 
-## Methods — milestone 1: Historical VaR + Expected Shortfall
+## Methods: Core Concepts
 
-Each VaR method is built and committed independently. The historical method is
-first because it is the most intuitive and serves as the sanity-check baseline
-the other two are measured against.
+**Shared API Conventions:**
 
-**Shared API conventions (set here, used by all three methods):**
+All methods accept the same `returns` array plus `confidence`, `horizon`, and `value`. Running
+every method on identical inputs is what makes the divergence analysis meaningful. The differences are meant to reflect the method, not the data.
 
-- All methods take the **same `returns` array** plus `confidence`, `horizon`,
-  and `value`. Running every method on identical data is what makes the
-  divergence analysis meaningful — differences are the *method*, not the input.
-- `confidence ∈ (0, 1)`; tail probability `alpha = 1 - confidence`
-  (`confidence=0.95` → the 5th percentile). Default is `0.95`.
-- VaR and ES are returned as **positive losses** in the units of `value`
-  (default `1.0`, so a loss *fraction*). This makes the `ES ≥ VaR` invariant
-  read naturally.
-- Multi-day horizons use the **square-root-of-time** rule.
+- $\text{confidence} \in (0,1)$; tail probability $\text{alpha} = 1 - \text{confidence}$    
+  ($\text{confidence} = .95 \rightarrow$ the 5th percentile). Default is $.95$
+- VaR and ES are returned as positive losses in the units of $\text{value}$ (default is $1.0$,
+  so a loss fraction)
+- Multi-day horizons use the square-root-of-time rule (e.g. for a 7 day time period, we multiply the daily volatility by $\sqrt{7}$)
 
-**Historical VaR.** Sort the observed returns and read off the empirical
-`alpha`-quantile — *no distributional assumption*. We use `numpy`'s linear
-interpolation between order statistics (`np.quantile(..., method="linear")`).
-The quantile is a return (typically negative); VaR is its negation.
+**Expected Shortfall:**
 
-**Historical Expected Shortfall.** Average every observed return at or below the
-`alpha`-quantile — the mean loss *given* the threshold is breached. Because the
-mean of the tail is at least as extreme as the threshold itself, `ES ≥ VaR`
-holds by construction. `_quantile` is shared with VaR so the two metrics use the
-*same* tail cutoff.
+Expected Shortfall (ES) is the mean loss *given* that the VaR threshold has been breached. It does not just provide threshold, but the magnitude beyond the threshold. ES is computed identically across each method: average every return at or below the $\text{alpha}$-quantile.
 
-**Why this is the baseline.** Historical VaR's only assumption is that the
-sampled past resembles the future. Its strength (no shape assumption — it
-captures fat tails and skew if they are *in the window*) is also its weakness:
-it is **hostage to its lookback window**. No crash in the sample → no crash in
-the estimate, and the quantile is a step function of a finite sample (coarse and
-jumpy in the deep tail). Those limitations are exactly what the parametric and
-Monte Carlo methods trade against, and they set up the divergence discussion.
+**ES $\geq$ VaR Invariant:**
 
-**Testing notes.** Reference values use a hand-built symmetric return series
-whose quantile positions are integers, so the expected quantile lands exactly on
-an order statistic with no interpolation. The independent cross-check draws a
-large normal sample and compares historical VaR/ES to the closed-form normal
-quantile and tail expectation (via `scipy`), with a method-aware relative
-tolerance (5%) rather than exact equality — sampling noise and the empirical
-quantile's coarseness make equality the wrong assertion.
+By definition, the mean of the tail is at least as extreme as the threshold that defines it, so ES $\geq$ VaR holds as a mathematical property across all three methods. Each method has its own implementation for enforcing this invariant, documented in its respective Design Choices section.
+
+**Data ingestion and Caching:**
+
+Market data is fetched from the Alpha Vantage `TIME_SERIES_DAILY` endpoint. The free tier returns only the last ~100 trading days per request (`outputsize='compact'`), which is sufficient for a stable 95% estimate. But, it makes the 99% historical tail coarse; that is, it leans on the worst one or two observations in the window.
+
+The data layer bypasses this limit through idempotent accumulation. Fetched prices are upserted into a local SQLite database keyed on `(ticker, date)`: existing rows are updated in place and new rows are appended, so no date is ever duplicated and no API budget is re-spent on data already held. All three methods then consume prices loaded from this cache rather than directly from the API. Running the pipeline regularly therefore builds a historical window that grows beyond 100 points over time without requiring a premium key. A `--no-fetch` flag allows re-running the analysis entirely from cached data once prices have been pulled.
+
+Alternatively, `outputsize='full'` with a premium key fetches the complete available history in a single request.
 
 ---
 
-## Methods — milestone 2: Parametric (variance-covariance)
+## Methods: Historical VaR
 
-The parametric method assumes returns are **normally distributed**, estimates
-the mean and volatility from the sample, and reads VaR/ES off the closed-form
-normal tail.
+**Overview:**
 
-**Formulas** (with `z = Phi^{-1}(confidence)`, `phi` the standard-normal pdf,
-`alpha = 1 - confidence`):
+Historical VaR sorts observed returns and reads off the empirical `alpha`-quantile with no distributional assumption. Its only assumption is that the sampled past resembles the future, which makes it the most intuitive method and the natural baseline against which the parametric and Monte Carlo methods are measured.
 
-- `VaR = (z·sigma - mu) · sqrt(horizon) · value`
-- `ES  = (sigma·phi(z)/alpha - mu) · sqrt(horizon) · value`
+**Formulas:**
 
-**Estimator choices and why:**
+Let $r_{\alpha}$ denote the empirical `alpha`-quantile of the return series, computed via linear interpolation between order statistics.
 
-- **Unbiased volatility (`ddof=1`).** We are *estimating* the population sigma
-  from a sample, so the sample standard deviation (dividing by `n-1`) is the
-  right estimator. The reference tests pin this down by comparing against the
-  exact `ddof=1` value.
-- **The mean is estimated and subtracted, not assumed zero.** This is the key
-  decision for the divergence analysis. Historical VaR already embeds the drift
-  through the empirical quantile; if parametric assumed `mu = 0` while historical
-  did not, the two would diverge for a reason that has nothing to do with
-  distributional shape. By treating the mean identically, any remaining
-  divergence is attributable to the **shape assumption** — which is exactly what
-  we want to study. (For 1-day horizons `mu` is typically tiny next to `z·sigma`,
-  so this rarely moves the number much, but it keeps the comparison honest.)
-- **`scipy.stats.norm`** supplies `ppf`/`pdf`; `scipy` is allowed in the math
-  core alongside `numpy`.
+  $VaR = -r_{\alpha} \cdot \sqrt{h} \cdot V$
 
-**The divergence story begins here.** On a genuinely normal sample the
-parametric and historical numbers converge (the headline cross-check asserts
-agreement within 5% on 200k–300k draws). They *diverge* on real returns because
-real returns are **not** normal:
+  $ES = - \frac{1}{|\mathcal{T}|} \sum_{r_{i} \in \mathcal{T}}r_{t} \cdot \sqrt{h} \cdot V$
 
-- **Fat tails (excess kurtosis).** Equity returns have more extreme moves than a
-  normal allows. Parametric VaR, anchored to `z·sigma`, **understates** deep-tail
-  risk; historical, reading an actual empirical quantile, captures those moves if
-  they are in the window. The gap typically widens at 99% vs 95%.
-- **Skew.** The normal is symmetric; real equity returns are often
-  left-skewed (crashes bigger than melt-ups). Parametric cannot see this;
-  historical can.
-- **Where parametric wins.** It is smooth and stable (no dependence on whether a
-  single bad day happens to sit in the window), and it extrapolates into the tail
-  rather than being capped by the worst observation — so at very high confidence
-  with a short window it can actually be the more *conservative* of the two.
+where $\mathcal{T} = \{r_t : r_t \leq r_{\alpha}\}$ is the tail set, $h$ is the horizon in days, and $V$ is the portfolio value.
 
-Monte Carlo (milestone 3) will simulate from these same estimated parameters; on
-a normal model it should converge to parametric, which makes it both a validation
-of the parametric formula and the natural place to introduce a non-normal
-generating distribution later.
+**Design Choices:**
+
+- Linear Interpolation: (`np.quantile(...,method='linear')`). Interpolates between order statistics rather than snapping to the nearest observed value, producing a smoother quantile estimate across confidence levels.
+- Shared `_quantile` for VaR and ES. Both metrics use the same tail cutoff, which is how the implementation enforces the $ES \geq VaR$ invariant for this method.
+
+**Strengths and Limitations:**
+
+*Strengths:* Makes no shape assumption — fat tails, skew, and multimodality are all captured if they appear in the window. Intuitive and transparent: the VaR estimate is directly traceable to observed returns.
+
+*Limitations:* Hostage to its lookback window: no crash in the sample means no crash in the estimate. The quantile is a step function of a finite sample, making it coarse and jumpy in the deep tail.
+
+**Divergence Notes:**
+
+Historical serves as the baseline. On genuinely normal data it converges with parametric and Monte Carlo. On real returns it diverges because the empirical tail captures fat tails and skew that the other two methods' normal assumption cannot see. The gap typically widens at 99% vs. 95% confidence, where tail shape matters most.
+
+**Testing Notes:**
+
+Reference values use a hand-built symmetric return series whose quantile positions are integers, so the expected quantile lands exactly on an order statistic with no interpolation. The independent cross-check draws a large normal sample and compares historical VaR and ES to the closed-form normal quantile and tail expectation via scipy, with a method-aware relative tolerance of 5% — sampling noise and the empirical quantile's coarseness make exact equality the wrong assertion.
 
 ---
 
-## Methods — milestone 3: Monte Carlo
+## Methods: Parametric (variance-covariance)
 
-The Monte Carlo method estimates `mu`/`sigma` exactly as the parametric method
-does, then **simulates** `n_sims` draws from `N(mu, sigma)` and reads VaR/ES off
-the *simulated* distribution — empirical quantile for VaR, simulated-tail mean
-for ES — reusing the same `_quantile`/tail machinery as the historical method.
+**Overview:**
 
-**Design choices and why:**
+The parametric method assumes returns are normally distributed, estimates the mean and volatility from the sample, and reads VaR and ES off the closed-form normal tail. It is smooth, stable, and extrapolates beyond the worst observed return — properties that come at the cost of the normality assumption.
 
-- **Same estimator, simulated instead of solved.** Because MC draws from the
-  fitted normal, on a normal model it must converge to the parametric closed
-  form as `n_sims → ∞`. That convergence is the milestone's headline test (MC vs
-  parametric within ~3–4% at 100k–200k draws) and it **validates two methods at
-  once**: if the analytic formula and the simulation agree, both are almost
-  certainly right.
-- **Reproducibility via `seed`.** MC is stochastic, but a risk number you can't
-  reproduce is hard to trust or store. A keyword-only `seed` makes a run
-  repeatable; `risk_report` passes the *same* seed to MC VaR and ES so they draw
-  from one simulation and the `ES ≥ VaR` invariant holds exactly rather than
-  probabilistically.
-- **`n_sims` default 100k.** Enough for a stable 99% tail while staying fast.
-  It is validated (`>= 1`) in the MC branch, not in the shared `validate_inputs`,
-  since it is method-specific — the same pattern as the parametric "≥ 2 returns"
-  guard.
-- **Horizon via the shared √-time rule.** MC simulates single-period returns and
-  scales by `sqrt(horizon)` like the other two methods, keeping all three
-  comparable. Simulating multi-step compounded paths is the obvious extension and
-  the natural home for a non-normal step distribution.
+**Formulas:**
 
-**Where MC sits in the divergence story.** As currently built (Gaussian
-generator) MC carries the **same normality assumption as parametric**, so it
-shares parametric's blind spot to fat tails and skew and will likewise diverge
-from historical on real returns. Its value here is twofold: (1) a cross-check
-that the parametric algebra is correct, and (2) the one method whose *generating
-distribution is a free parameter* — swapping the normal draw for a Student-t or a
-bootstrap of the empirical returns would let MC capture fat tails while keeping
-the smooth, extrapolating-into-the-tail character that historical lacks. That is
-the most promising lever for the divergence analysis and a documented next step.
+Let $z = \Phi^{-1}(\text{confidence})$, $\phi$ the standard-normal PDF, and $\alpha = 1 - \text{confidence}$.
+
+  $VaR = (z \cdot \sigma - \mu) \cdot \sqrt{h} \cdot V$
+
+  $ES = (\frac{\sigma \cdot \phi(z)}{\alpha} - \mu) \cdot \sqrt{h} \cdot V$
+
+where $\mu$ and $\sigma$ are estimated from the sample, $h$ is the horizon in days, $V$ is the portfolio value.
+
+**Design Choices:**
+
+- Unbiased volatility (`ddof=1`). Dividing by $n - 1$ gives the correct estimator when inferring a population $\sigma$ from a sample. Reference tests pin this down by comparing against the exact `ddof=1` value.
+- Mean estimated and subtracted, not assumed zero. Historical VaR already embeds drift through the empirical quantile. Treating $\mu$ identically in parametric ensures that any divergence between the two methods is attributable to the shape assumption, not a difference in drift handling. For 1-day horizons $\mu$ is usually negligible next to $z \cdot \sigma$, but the choice keeps the comparison honest.
+- `scipy.stats.norm` supplies the `ppf` and `pdf`, `scipy` is permitted in the math core alongside `numpy`.
+- $ES \geq VaR$ reinforcement. The closed-form normal tail guarantees this analytically: the truncated mean of a normal distribution always exceeds its truncation point.
+
+**Strengths and Limitations:**
+
+*Strengths:* Smooth and stable; it is not dependent on whether a single extreme day falls inside the window. Extrapolates into the tail beyond the worst observed return, which can make it more conservative than historical at very high confidence levels with short windows.
+
+*Limitations:* Anchored to $z \cdot \sigma$ so it systematically understates deep-tail risk when returns exhibit excess kurtosis. Cannot capture skew: the normal is symmetric, and left-skewed real returns will cause the loss tail to be underestimated.
+
+**Divergence Notes:**
+
+On a genuinely normal sample, parametric and historical converge (cross-check asserts agreement within 5% on 200k–300k draws). On real returns they diverge due to fat tails and skew. The gap typically widens at 99% vs. 95% confidence. Monte Carlo, currently drawing from the same fitted normal, shares this blind spot and should converge to parametric — which both validates the parametric formula and sets up the natural extension of swapping the normal generator for a heavier-tailed distribution.
+
+**Testing Notes:**
+
+Reference tests compare computed VaR and ES against manually derived values using a known $\mu, \sigma,$ and confidence level. This pins the `ddof=1` estimator explicitly. The headline cross-check runs parametric against historical on a large normal sample (200k-300k draws) and asserts agreement within 5% relative tolerance.
+
+---
+
+## Methods: Monte Carlo
+
+**Overview:**
+
+The Monte Carlo method estimates $\mu$ and $\sigma$ exactly as the parametric method does, then simulates `n_sims` draws from $\mathcal{N}(\mu, \sigma)$ and reads VaR and ES off the simulated distribution. It reuses the same empirical quantile and tail-mean structure as the historical method. Its primary value is a cross-check on the parametric formula and as the method whose generating distribution is a free parameter.
+
+**Formulas:**
+
+Let $\{r_i\}_{i=1}^{\mathcal{N}}$ be draws from $\mathcal{N}(\mu, \sigma)$ where $\hat{\mu}$ and $\hat{\sigma}$ are estimated from the input returns.
+
+  $VaR = -r_{\alpha}^{\text{sim}} \cdot \sqrt{h} \cdot V$
+
+  $ES = - \frac{1}{|\mathcal{T}|} \sum_{r_{i} \in \mathcal{T}}r_{t} \cdot \sqrt{h} \cdot V$
+
+where $r_{\alpha}^{\text{sim}}$ is the empirical `alpha`-quantile of the simulated draws, $\mathcal{T} = \{r_i : r_i \leq r_{\alpha}^{\text{sim}}\}$, $h$ is the horizon in days, and $V$ is the portfolio value.
+
+**Design Choices:**
+
+- Same estimator as parametric. Because Monte Carlo draws from the fitted normal, it must converge to the parametric closed form as $\mathcal{N} \rightarrow \infty$. That convergence is the headline test and validates both methods simultaneously.
+- Reproducibility via `seed`. A keyword-only `seed` makes any run repeatable. `risk_report` passes the same seed to MC VaR and ES so both draw from one simulation; it ensures $ES \geq VaR$ holds exactly rather than probabilistically across two independent draws.
+- `n_sims` default to 100k. Sufficient for a stable 99% tail while remaining fast. Validated as `>= 1` in the MC branch rather than in shared `validate_inputs`, following the same pattern as the parametric "$\geq 2$ returns" guard.
+- Horizon via the shared $\sqrt{h}$ rule. MC simulates single-period returns and scales by $\sqrt{h}$, keeping all three methods comparable. Simulating multi-step compounded paths is the natural extension for a non-normal step distribution.
+
+**Strengths and Limitations:**
+
+*Strengths:* Validates the parametric formula by converging to it on a normal model. The generating distribution is a free parameter. Swapping the normal draw for a Student-$t$ or an empirical bootstrap would let MC capture fat tails while retaining the smooth, tail-extrapolating character that historical lacks.
+
+*Limitations:* As currently built with a Gaussian generator, MC carries the same normality assumption as parametric and shares its blind spot to fat tails and skew. Simulation variance means results are not exact even at high `n_sims`, unlike the parametric closed form.
+
+**Divergence Notes:**
+
+On a normal model, MC converges to parametric (within ~3-4% at 100k-200k draws), confirming both methods. On real returns, MC diverges from historical for the same reason as parametric; they diverge at fat tails and the skew that the generator cannot reproduce. Replacing the generator with a non-normal distribution is likely the most promising lever for closing this gap.
+
+**Testing Notes:**
+
+The headline test asserts that MC VaR and ES agree with their parametric counterparts within ~3-4% relative tolerance at 100k-200k draws. Reproducibility is verified by running the same seed twice and asserting identical outputs. The `n_sims >= 1` guard is tested explicitly in the MC validation path.
 
 ---
 
